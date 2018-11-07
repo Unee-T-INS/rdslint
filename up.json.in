@@ -1,0 +1,58 @@
+{
+  "name": "dbcheck",
+  "profile": "uneet-dev",
+  "stages": {
+    "production": {
+      "domain": "dbcheck.dev.unee-t.com",
+      "zone": "dev.unee-t.com"
+    }
+  },
+  "regions": [
+    "ap-southeast-1"
+  ],
+  "error_pages": {
+    "disable": true
+  },
+  "lambda": {
+    "policy": [
+      {
+        "Effect": "Allow",
+        "Resource": "*",
+        "Action": [
+          "ssm:GetParameter"
+        ]
+      }
+    ]
+  },
+  "actions": [
+    {
+      "name": "email.backend",
+      "type": "email",
+      "emails": [
+        "kai.hendry+dbcheck@unee-t.com"
+      ]
+    }
+  ],
+  "alerts": [
+    {
+      "metric": "http.count",
+      "statistic": "sum",
+      "threshold": 100,
+      "action": "email.backend"
+    },
+    {
+      "metric": "http.5xx",
+      "statistic": "sum",
+      "threshold": 1,
+      "period": "1m",
+      "action": "email.backend"
+    },
+    {
+      "metric": "http.4xx",
+      "statistic": "sum",
+      "threshold": 50,
+      "period": "5m",
+      "action": "email.backend"
+    }
+  ]
+}

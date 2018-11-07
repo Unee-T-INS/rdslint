@@ -1,0 +1,9 @@
+build:
+  env:
+    - CGO_ENABLED=0
+
+dockers:
+  - image: uneet/dbcheck
+    tag_templates:
+      - '{{ .Tag }}'
+      - 'latest'
