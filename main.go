@@ -94,6 +94,7 @@ func (h handler) BasicEngine() http.Handler {
 	app.HandleFunc("/ping", h.ping).Methods("GET")
 	app.HandleFunc("/fail", fail).Methods("GET")
 	app.HandleFunc("/metrics", h.prometheus).Methods("GET")
+	app.HandleFunc("/", h.aversion).Methods("GET")
 
 	return app
 }
@@ -137,6 +138,27 @@ func (h handler) ping(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 	fmt.Fprintf(w, "OK")
+}
+
+func (h handler) aversion(w http.ResponseWriter, r *http.Request) {
+
+	rows, err := h.db.Query("select AURORA_VERSION()")
+	if err != nil {
+		log.WithError(err).Error("failed to open database")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var version string
+
+	for rows.Next() {
+		if err := rows.Scan(&version); err != nil {
+			log.WithError(err).Error("failed to scan version")
+		}
+	}
+
+	fmt.Fprintf(w, "Aurora version: %s", version)
 }
 
 func (h handler) prometheus(w http.ResponseWriter, r *http.Request) {
