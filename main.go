@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/endpoints"
 	"github.com/aws/aws-sdk-go-v2/aws/external"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/unee-t/env"
 
 	"github.com/apex/log"
@@ -40,6 +42,7 @@ func init() {
 	if v := os.Getenv("UP_COMMIT"); v != "" {
 		commit = v
 	}
+
 }
 
 // New setups the configuration assuming various parameters have been setup in the AWS account
@@ -94,8 +97,7 @@ func (h handler) BasicEngine() http.Handler {
 	app.HandleFunc("/ping", h.ping).Methods("GET")
 	app.HandleFunc("/fail", fail).Methods("GET")
 	app.HandleFunc("/schema", h.schemaversion).Methods("GET")
-	app.HandleFunc("/metrics", h.prometheus).Methods("GET")
-	app.HandleFunc("/", h.aversion).Methods("GET")
+	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
 	return app
 }
@@ -109,6 +111,8 @@ func main() {
 	}
 
 	defer h.db.Close()
+
+	prometheus.MustRegister(h.aversion())
 
 	addr := ":" + os.Getenv("PORT")
 	app := h.BasicEngine()
@@ -163,25 +167,39 @@ func (h handler) schemaversion(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Schema version: %s", version)
 }
 
-func (h handler) aversion(w http.ResponseWriter, r *http.Request) {
+func (h handler) aversion() (dbinfo *prometheus.GaugeVec) {
 
 	rows, err := h.db.Query("select AURORA_VERSION()")
 	if err != nil {
 		log.WithError(err).Error("failed to open database")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return dbinfo
 	}
 	defer rows.Close()
 
-	var version string
+	var aversion string
 
 	for rows.Next() {
-		if err := rows.Scan(&version); err != nil {
+		if err := rows.Scan(&aversion); err != nil {
 			log.WithError(err).Error("failed to scan version")
 		}
 	}
 
-	fmt.Fprintf(w, "Aurora version: %s", version)
+	program := "aurora"
+
+	dbinfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: program,
+			Name:      "build_info",
+			Help: fmt.Sprintf(
+				"A metric with a constant '1' value labeled by version, revision, branch, and goversion from which %s was built.",
+				program,
+			),
+		},
+		[]string{"aversion", "version", "commit", "date"},
+	)
+	dbinfo.WithLabelValues(aversion, version, commit, date).Set(1)
+	return dbinfo
+
 }
 
 func (h handler) prometheus(w http.ResponseWriter, r *http.Request) {

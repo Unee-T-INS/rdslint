@@ -31,5 +31,8 @@ prod:
 	jq $(PRODUPJSON) up.json.in > up.json
 	up deploy production
 
+test:
+	curl -H "Authorization: Bearer $(shell aws --profile uneet-dev ssm get-parameters --names API_ACCESS_TOKEN --with-decryption --query Parameters[0].Value --output text)" localhost:3000/metrics
+
 testdev:
 	curl -H "Authorization: Bearer $(shell aws --profile uneet-dev ssm get-parameters --names API_ACCESS_TOKEN --with-decryption --query Parameters[0].Value --output text)" https://dbcheck.dev.unee-t.com/version
