@@ -93,6 +93,7 @@ func (h handler) BasicEngine() http.Handler {
 	app.HandleFunc("/version", showversion).Methods("GET")
 	app.HandleFunc("/ping", h.ping).Methods("GET")
 	app.HandleFunc("/fail", fail).Methods("GET")
+	app.HandleFunc("/schema", h.schemaversion).Methods("GET")
 	app.HandleFunc("/metrics", h.prometheus).Methods("GET")
 	app.HandleFunc("/", h.aversion).Methods("GET")
 
@@ -138,6 +139,28 @@ func (h handler) ping(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 	fmt.Fprintf(w, "OK")
+}
+
+func (h handler) schemaversion(w http.ResponseWriter, r *http.Request) {
+
+	//	rows, err := h.db.Query("SELECT MAX(`schema_version`) FROM `ut_db_schema_version`")
+	rows, err := h.db.Query("SET @highest_id = (SELECT MAX(`id`) FROM `ut_db_schema_version`); SELECT `schema_version` FROM `ut_db_schema_version` WHERE `id` = @highest_id;")
+	if err != nil {
+		log.WithError(err).Error("failed to open database")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var version string
+
+	for rows.Next() {
+		if err := rows.Scan(&version); err != nil {
+			log.WithError(err).Error("failed to scan version")
+		}
+	}
+
+	fmt.Fprintf(w, "Schema version: %s", version)
 }
 
 func (h handler) aversion(w http.ResponseWriter, r *http.Request) {
