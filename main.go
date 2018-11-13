@@ -103,22 +103,22 @@ func main() {
 
 	defer h.db.Close()
 
-	dbinfo := prometheus.NewGaugeVec(
+	dbcheck := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "dbinfo",
 			Help: "A metric with a constant '1' value labeled by the Unee-T schema version, Aurora version and lambda commit.",
 		},
-		[]string{"schemaversion", "aversion", "commit"},
+		[]string{"schemaversion", "auroraversion", "commit"},
 	)
 
 	schemaversion := h.schemaversion()
 	aversion := h.aversion()
-	dbinfo.WithLabelValues(schemaversion, aversion, commit).Set(1)
+	dbcheck.WithLabelValues(schemaversion, aversion, commit).Set(1)
 
 	// TODO: Implement a collector
 	// i.e. I am using the "direct instrumentation" approach atm
 	// https://github.com/prometheus/docs/blob/master/content/docs/instrumenting/writing_exporters.md#collectors
-	prometheus.MustRegister(dbinfo)
+	prometheus.MustRegister(dbcheck)
 	prometheus.MustRegister(h.userGroupMapCount())
 
 	addr := ":" + os.Getenv("PORT")
