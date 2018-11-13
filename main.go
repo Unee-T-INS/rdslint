@@ -31,7 +31,6 @@ type handler struct {
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
 	APIAccessToken string // e.g. O8I9svDTizOfLfdVA5ri
 	db             *sql.DB
-	Code           env.EnvCode
 }
 
 func init() {
@@ -75,10 +74,7 @@ func New() (h handler, err error) {
 			e.GetSecret("MYSQL_PASSWORD"),
 			mysqlhost),
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
-		Code:           e.Code,
 	}
-
-	log.Infof("h.Code is %d", h.Code)
 
 	h.db, err = sql.Open("mysql", h.DSN)
 	if err != nil {
@@ -91,14 +87,9 @@ func New() (h handler, err error) {
 }
 
 func (h handler) BasicEngine() http.Handler {
-
 	app := mux.NewRouter()
-	app.HandleFunc("/version", showversion).Methods("GET")
-	app.HandleFunc("/ping", h.ping).Methods("GET")
-	app.HandleFunc("/fail", fail).Methods("GET")
-	app.HandleFunc("/schema", h.schemaversion).Methods("GET")
+	app.HandleFunc("/", h.ping).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
-
 	return app
 }
 
@@ -112,7 +103,23 @@ func main() {
 
 	defer h.db.Close()
 
-	prometheus.MustRegister(h.aversion())
+	dbinfo := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "dbinfo",
+			Help: "A metric with a constant '1' value labeled by the Unee-T schema version, Aurora version and lambda commit.",
+		},
+		[]string{"schemaversion", "aversion", "commit"},
+	)
+
+	schemaversion := h.schemaversion()
+	aversion := h.aversion()
+	dbinfo.WithLabelValues(schemaversion, aversion, commit).Set(1)
+
+	// TODO: Implement a collector
+	// i.e. I am using the "direct instrumentation" approach atm
+	// https://github.com/prometheus/docs/blob/master/content/docs/instrumenting/writing_exporters.md#collectors
+	prometheus.MustRegister(dbinfo)
+	prometheus.MustRegister(h.userGroupMapCount())
 
 	addr := ":" + os.Getenv("PORT")
 	app := h.BasicEngine()
@@ -121,15 +128,6 @@ func main() {
 		log.WithError(err).Fatal("error listening")
 	}
 
-}
-
-func showversion(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "%v, commit %v, built at %v", version, commit, date)
-}
-
-func fail(w http.ResponseWriter, r *http.Request) {
-	log.Warn("5xx")
-	http.Error(w, "5xx", http.StatusInternalServerError)
 }
 
 func (h handler) ping(w http.ResponseWriter, r *http.Request) {
@@ -145,82 +143,64 @@ func (h handler) ping(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
 }
 
-func (h handler) schemaversion(w http.ResponseWriter, r *http.Request) {
+func (h handler) schemaversion() (version string) {
 
-	//	rows, err := h.db.Query("SELECT MAX(`schema_version`) FROM `ut_db_schema_version`")
 	rows, err := h.db.Query("SET @highest_id = (SELECT MAX(`id`) FROM `ut_db_schema_version`); SELECT `schema_version` FROM `ut_db_schema_version` WHERE `id` = @highest_id;")
 	if err != nil {
 		log.WithError(err).Error("failed to open database")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
-
-	var version string
 
 	for rows.Next() {
 		if err := rows.Scan(&version); err != nil {
 			log.WithError(err).Error("failed to scan version")
 		}
 	}
+	return version
 
-	fmt.Fprintf(w, "Schema version: %s", version)
 }
 
-func (h handler) aversion() (dbinfo *prometheus.GaugeVec) {
+func (h handler) aversion() (aversion string) {
 
 	rows, err := h.db.Query("select AURORA_VERSION()")
 	if err != nil {
 		log.WithError(err).Error("failed to open database")
-		return dbinfo
+		return
 	}
 	defer rows.Close()
-
-	var aversion string
 
 	for rows.Next() {
 		if err := rows.Scan(&aversion); err != nil {
 			log.WithError(err).Error("failed to scan version")
 		}
 	}
-
-	program := "aurora"
-
-	dbinfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: program,
-			Name:      "build_info",
-			Help: fmt.Sprintf(
-				"A metric with a constant '1' value labeled by version, revision, branch, and goversion from which %s was built.",
-				program,
-			),
-		},
-		[]string{"aversion", "version", "commit", "date"},
-	)
-	dbinfo.WithLabelValues(aversion, version, commit, date).Set(1)
-	return dbinfo
+	return aversion
 
 }
 
-func (h handler) prometheus(w http.ResponseWriter, r *http.Request) {
-
+func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 	rows, err := h.db.Query("select COUNT(*) from user_group_map")
 	if err != nil {
 		log.WithError(err).Error("failed to open database")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var count int
+	// Would be nice to just be an int
+	var count float64
 
 	for rows.Next() {
 		if err := rows.Scan(&count); err != nil {
 			log.WithError(err).Error("failed to scan count")
 		}
 	}
-
 	log.Infof("Count: %d", count)
 
-	fmt.Fprintf(w, "# HELP user_group_map_total shows the number of rows in the user_group_map table.\n# TYPE user_group_map_total counter\nuser_group_map_total %d", count)
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "user_group_map_total", Help: "shows the number of rows in the user_group_map table."})
+
+	countMetric.Set(count)
+
+	return countMetric
 }
