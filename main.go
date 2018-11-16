@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/endpoints"
 	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
@@ -94,6 +95,7 @@ func New() (h handler, err error) {
 func (h handler) BasicEngine() http.Handler {
 	app := mux.NewRouter()
 	app.HandleFunc("/", h.ping).Methods("GET")
+	app.HandleFunc("/describe", h.describe).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
 	return app
 }
@@ -247,4 +249,26 @@ func (h handler) lookupClusterName(domain string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no alias found for %s", domain)
+}
+
+func (h handler) describeCluster(domain string) (rds.DBCluster, error) {
+
+	dnsEndpoint, err := h.lookupClusterName(domain)
+	if err != nil {
+		return rds.DBCluster{}, err
+	}
+
+	rdsapi := rds.New(h.AWSCfg)
+	req := rdsapi.DescribeDBClustersRequest(&rds.DescribeDBClustersInput{})
+	result, err := req.Send()
+	if err != nil {
+		return rds.DBCluster{}, err
+	}
+	for _, v := range result.DBClusters {
+		if *v.Endpoint == dnsEndpoint {
+			return v, err
+		}
+	}
+	return rds.DBCluster{}, fmt.Errorf("no cluster info found for %s", domain)
+
 }
