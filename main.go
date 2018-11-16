@@ -221,7 +221,6 @@ func (h handler) lookupHostedZone(domain string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println(hzs)
 	for _, v := range hzs.HostedZones {
 		name := strings.TrimRight(*v.Name, ".")
 		if domain[len(domain)-len(name):] == name {
@@ -229,4 +228,23 @@ func (h handler) lookupHostedZone(domain string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no hosted zone found for %s", domain)
+}
+
+func (h handler) lookupClusterName(domain string) (string, error) {
+	r53 := route53.New(h.AWSCfg)
+	hz, err := h.lookupHostedZone(domain)
+	if err != nil {
+		return "", err
+	}
+	req := r53.ListResourceRecordSetsRequest(&route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(hz),
+	})
+	listrecords, err := req.Send()
+	for _, v := range listrecords.ResourceRecordSets {
+		// log.Infof("Name: %s", *v.Name)
+		if *v.Name == domain+"." {
+			return strings.TrimRight(*v.AliasTarget.DNSName, "."), err
+		}
+	}
+	return "", fmt.Errorf("no alias found for %s", domain)
 }
