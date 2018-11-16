@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/endpoints"
 	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -28,6 +31,7 @@ var (
 )
 
 type handler struct {
+	AWSCfg         aws.Config
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
 	APIAccessToken string // e.g. O8I9svDTizOfLfdVA5ri
 	db             *sql.DB
@@ -69,6 +73,7 @@ func New() (h handler, err error) {
 	}
 
 	h = handler{
+		AWSCfg: cfg,
 		DSN: fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL",
 			e.GetSecret("MYSQL_USER"),
 			e.GetSecret("MYSQL_PASSWORD"),
@@ -203,4 +208,25 @@ func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 	countMetric.Set(count)
 
 	return countMetric
+}
+
+func (h handler) lookupHostedZone(domain string) (string, error) {
+
+	// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/route53#example-Route53-GetHostedZoneRequest-Shared00
+	// domain := "auroradb.dev.unee-t.com"
+
+	r53 := route53.New(h.AWSCfg)
+	req := r53.ListHostedZonesRequest(&route53.ListHostedZonesInput{})
+	hzs, err := req.Send()
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(hzs)
+	for _, v := range hzs.HostedZones {
+		name := strings.TrimRight(*v.Name, ".")
+		if domain[len(domain)-len(name):] == name {
+			return *v.Id, err
+		}
+	}
+	return "", fmt.Errorf("no hosted zone found for %s", domain)
 }
