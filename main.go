@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/tj/go/http/response"
 	"github.com/unee-t/env"
 
 	"github.com/apex/log"
@@ -34,7 +35,8 @@ var (
 type handler struct {
 	AWSCfg         aws.Config
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
-	APIAccessToken string // e.g. O8I9svDTizOfLfdVA5ri
+	APIAccessToken string
+	mysqlhost      string
 	db             *sql.DB
 }
 
@@ -63,24 +65,16 @@ func New() (h handler, err error) {
 		log.WithError(err).Warn("error getting unee-t env")
 	}
 
-	// Check for MYSQL_HOST override
-	var mysqlhost string
-	val, ok := os.LookupEnv("MYSQL_HOST")
-	if ok {
-		log.Infof("MYSQL_HOST overridden by local env: %s", val)
-		mysqlhost = val
-	} else {
-		mysqlhost = e.Udomain("auroradb")
-	}
-
 	h = handler{
-		AWSCfg: cfg,
-		DSN: fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL",
-			e.GetSecret("MYSQL_USER"),
-			e.GetSecret("MYSQL_PASSWORD"),
-			mysqlhost),
+		AWSCfg:         cfg,
+		mysqlhost:      e.Udomain("auroradb"),
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
+
+	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL",
+		e.GetSecret("MYSQL_USER"),
+		e.GetSecret("MYSQL_PASSWORD"),
+		h.mysqlhost)
 
 	h.db, err = sql.Open("mysql", h.DSN)
 	if err != nil {
@@ -146,6 +140,7 @@ func (h handler) ping(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ctx.WithError(err).Error("failed to ping database")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	fmt.Fprintf(w, "OK")
 }
@@ -212,11 +207,8 @@ func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 	return countMetric
 }
 
-func (h handler) lookupHostedZone(domain string) (string, error) {
-
+func (h handler) lookupHostedZone() (string, error) {
 	// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/route53#example-Route53-GetHostedZoneRequest-Shared00
-	// domain := "auroradb.dev.unee-t.com"
-
 	r53 := route53.New(h.AWSCfg)
 	req := r53.ListHostedZonesRequest(&route53.ListHostedZonesInput{})
 	hzs, err := req.Send()
@@ -225,16 +217,16 @@ func (h handler) lookupHostedZone(domain string) (string, error) {
 	}
 	for _, v := range hzs.HostedZones {
 		name := strings.TrimRight(*v.Name, ".")
-		if domain[len(domain)-len(name):] == name {
+		if h.mysqlhost[len(h.mysqlhost)-len(name):] == name {
 			return *v.Id, err
 		}
 	}
-	return "", fmt.Errorf("no hosted zone found for %s", domain)
+	return "", fmt.Errorf("no hosted zone found for %s", h.mysqlhost)
 }
 
-func (h handler) lookupClusterName(domain string) (string, error) {
+func (h handler) lookupClusterName() (string, error) {
 	r53 := route53.New(h.AWSCfg)
-	hz, err := h.lookupHostedZone(domain)
+	hz, err := h.lookupHostedZone()
 	if err != nil {
 		return "", err
 	}
@@ -244,16 +236,16 @@ func (h handler) lookupClusterName(domain string) (string, error) {
 	listrecords, err := req.Send()
 	for _, v := range listrecords.ResourceRecordSets {
 		// log.Infof("Name: %s", *v.Name)
-		if *v.Name == domain+"." {
+		if *v.Name == h.mysqlhost+"." {
 			return strings.TrimRight(*v.AliasTarget.DNSName, "."), err
 		}
 	}
-	return "", fmt.Errorf("no alias found for %s", domain)
+	return "", fmt.Errorf("no alias found for %s", h.mysqlhost)
 }
 
-func (h handler) describeCluster(domain string) (rds.DBCluster, error) {
+func (h handler) describeCluster() (rds.DBCluster, error) {
 
-	dnsEndpoint, err := h.lookupClusterName(domain)
+	dnsEndpoint, err := h.lookupClusterName()
 	if err != nil {
 		return rds.DBCluster{}, err
 	}
@@ -269,6 +261,14 @@ func (h handler) describeCluster(domain string) (rds.DBCluster, error) {
 			return v, err
 		}
 	}
-	return rds.DBCluster{}, fmt.Errorf("no cluster info found for %s", domain)
+	return rds.DBCluster{}, fmt.Errorf("no cluster info found for %s", h.mysqlhost)
+}
 
+func (h handler) describe(w http.ResponseWriter, r *http.Request) {
+	rdsCluster, err := h.describeCluster()
+	if err != nil {
+		log.WithError(err).Error("failed to find database info")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	response.JSON(w, rdsCluster)
 }
