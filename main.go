@@ -54,7 +54,7 @@ func init() {
 // New setups the configuration assuming various parameters have been setup in the AWS account
 func New() (h handler, err error) {
 
-	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-prod"))
+	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-dev"))
 	if err != nil {
 		log.WithError(err).Fatal("setting up credentials")
 		return
@@ -125,7 +125,7 @@ func main() {
 	addr := ":" + os.Getenv("PORT")
 	app := h.BasicEngine()
 
-	if err := http.ListenAndServe(addr, env.Protect(app, h.APIAccessToken)); err != nil {
+	if err := http.ListenAndServe(addr, app); err != nil {
 		log.WithError(err).Fatal("error listening")
 	}
 
@@ -259,6 +259,34 @@ func (h handler) describeCluster() (rds.DBCluster, error) {
 	}
 	for _, v := range result.DBClusters {
 		if *v.Endpoint == dnsEndpoint {
+			// for _, db := range v.DBClusterMembers {
+			// 	log.Infof("ID: %s", *db.DBInstanceIdentifier)
+			// 	req := rdsapi.DescribeDBParametersRequest(&rds.DescribeDBParametersInput{
+			// 		DBParameterGroupName: aws.String(*db.DBInstanceIdentifier),
+			// 	})
+			// 	p := req.Paginate()
+			// 	for p.Next() {
+			// 		page := p.CurrentPage()
+			// 		log.Infof("Page: %#v", page)
+			// 	}
+
+			// 	if err := p.Err(); err != nil {
+			// 		return rds.DBCluster{}, err
+			// 	}
+
+			// }
+			for _, db := range v.DBClusterMembers {
+				req := rdsapi.DescribeDBInstancesRequest(&rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(*db.DBInstanceIdentifier)})
+				p := req.Paginate()
+				for p.Next() {
+					page := p.CurrentPage()
+					log.Infof("Page: %#v", page)
+				}
+
+				if err := p.Err(); err != nil {
+					return rds.DBCluster{}, err
+				}
+			}
 			return v, err
 		}
 	}
