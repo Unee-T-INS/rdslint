@@ -287,11 +287,14 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 					req := rdsapi.DescribeDBParametersRequest(&rds.DescribeDBParametersInput{
 						DBParameterGroupName: aws.String(*group.DBParameterGroupName),
 					})
-					result, err := req.Send()
-					if err != nil {
-						return dbInfo, err
+
+					p := req.Paginate()
+					for p.Next() {
+						page := p.CurrentPage()
+						dbInfo.Params = append(dbInfo.Params, page.Parameters...)
+						// log.Infof("Page: %#v", page)
 					}
-					dbInfo.Params = append(dbInfo.Params, result.Parameters...)
+
 				}
 			}
 
