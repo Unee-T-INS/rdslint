@@ -35,6 +35,7 @@ var (
 type dbinfo struct {
 	Cluster rds.DBCluster
 	DBs     []rds.DBInstance
+	Params  []rds.Parameter
 }
 
 type handler struct {
@@ -265,22 +266,6 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 	for _, v := range result.DBClusters {
 		if *v.Endpoint == dnsEndpoint {
 			dbInfo.Cluster = v
-			// for _, db := range v.DBClusterMembers {
-			// 	log.Infof("ID: %s", *db.DBInstanceIdentifier)
-			// 	req := rdsapi.DescribeDBParametersRequest(&rds.DescribeDBParametersInput{
-			// 		DBParameterGroupName: aws.String(*db.DBInstanceIdentifier),
-			// 	})
-			// 	p := req.Paginate()
-			// 	for p.Next() {
-			// 		page := p.CurrentPage()
-			// 		log.Infof("Page: %#v", page)
-			// 	}
-
-			// 	if err := p.Err(); err != nil {
-			// 		return rds.DBCluster{}, err
-			// 	}
-
-			// }
 			// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/rds#example-RDS-DescribeDBInstancesRequest-Shared00
 			for _, db := range v.DBClusterMembers {
 				req := rdsapi.DescribeDBInstancesRequest(&rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(*db.DBInstanceIdentifier)})
@@ -289,9 +274,27 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 					return dbInfo, err
 				}
 				dbInfo.DBs = append(dbInfo.DBs, result.DBInstances...)
-				log.Infof("Result: %#v", result.DBInstances)
+				// log.Infof("Result: %#v", result.DBInstances)
 
 			}
+			for _, db := range dbInfo.DBs {
+				groupName := db.DBParameterGroups[0].DBParameterGroupName
+
+				for _, group := range db.DBParameterGroups {
+					if groupName != group.DBParameterGroupName {
+						log.Errorf("Differing parameter groups! %q != %q", *groupName, *group.DBParameterGroupName)
+					}
+					req := rdsapi.DescribeDBParametersRequest(&rds.DescribeDBParametersInput{
+						DBParameterGroupName: aws.String(*group.DBParameterGroupName),
+					})
+					result, err := req.Send()
+					if err != nil {
+						return dbInfo, err
+					}
+					dbInfo.Params = append(dbInfo.Params, result.Parameters...)
+				}
+			}
+
 			return dbInfo, err
 		}
 	}
