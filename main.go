@@ -32,6 +32,11 @@ var (
 	date    = "unknown"
 )
 
+type dbinfo struct {
+	Cluster rds.DBCluster
+	DBs     []rds.DBInstance
+}
+
 type handler struct {
 	AWSCfg         aws.Config
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
@@ -244,21 +249,22 @@ func (h handler) lookupClusterName() (string, error) {
 	return "", fmt.Errorf("no alias found for %s", h.mysqlhost)
 }
 
-func (h handler) describeCluster() (rds.DBCluster, error) {
+func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 
 	dnsEndpoint, err := h.lookupClusterName()
 	if err != nil {
-		return rds.DBCluster{}, err
+		return dbInfo, err
 	}
 
 	rdsapi := rds.New(h.AWSCfg)
 	req := rdsapi.DescribeDBClustersRequest(&rds.DescribeDBClustersInput{})
 	result, err := req.Send()
 	if err != nil {
-		return rds.DBCluster{}, err
+		return dbInfo, err
 	}
 	for _, v := range result.DBClusters {
 		if *v.Endpoint == dnsEndpoint {
+			dbInfo.Cluster = v
 			// for _, db := range v.DBClusterMembers {
 			// 	log.Infof("ID: %s", *db.DBInstanceIdentifier)
 			// 	req := rdsapi.DescribeDBParametersRequest(&rds.DescribeDBParametersInput{
@@ -275,22 +281,21 @@ func (h handler) describeCluster() (rds.DBCluster, error) {
 			// 	}
 
 			// }
+			// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/rds#example-RDS-DescribeDBInstancesRequest-Shared00
 			for _, db := range v.DBClusterMembers {
 				req := rdsapi.DescribeDBInstancesRequest(&rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(*db.DBInstanceIdentifier)})
-				p := req.Paginate()
-				for p.Next() {
-					page := p.CurrentPage()
-					log.Infof("Page: %#v", page)
+				result, err := req.Send()
+				if err != nil {
+					return dbInfo, err
 				}
+				dbInfo.DBs = append(dbInfo.DBs, result.DBInstances...)
+				log.Infof("Result: %#v", result.DBInstances)
 
-				if err := p.Err(); err != nil {
-					return rds.DBCluster{}, err
-				}
 			}
-			return v, err
+			return dbInfo, err
 		}
 	}
-	return rds.DBCluster{}, fmt.Errorf("no cluster info found for %s", h.mysqlhost)
+	return dbInfo, fmt.Errorf("no cluster info found for %s", h.mysqlhost)
 }
 
 func (h handler) describe(w http.ResponseWriter, r *http.Request) {
