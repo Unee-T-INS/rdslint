@@ -44,6 +44,7 @@ type handler struct {
 	APIAccessToken string
 	mysqlhost      string
 	db             *sql.DB
+	dbInfo         dbinfo
 }
 
 func init() {
@@ -87,6 +88,11 @@ func New() (h handler, err error) {
 		log.WithError(err).Fatal("error opening database")
 		return
 	}
+	h.dbInfo, err = h.describeCluster()
+	if err != nil {
+		log.WithError(err).Fatal("error collecting info")
+		return
+	}
 
 	return
 
@@ -127,6 +133,8 @@ func main() {
 	// https://github.com/prometheus/docs/blob/master/content/docs/instrumenting/writing_exporters.md#collectors
 	prometheus.MustRegister(dbcheck)
 	prometheus.MustRegister(h.userGroupMapCount())
+	prometheus.MustRegister(h.slowLogEnabled())
+	prometheus.MustRegister(h.checkMyAssumption())
 
 	addr := ":" + os.Getenv("PORT")
 	app := h.BasicEngine()
@@ -210,6 +218,35 @@ func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 		Name: "user_group_map_total", Help: "shows the number of rows in the user_group_map table."})
 
 	countMetric.Set(count)
+
+	return countMetric
+}
+
+func (h handler) checkMyAssumption() (countMetric prometheus.Gauge) {
+
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "assumption", Help: "shows zero... hopefully."})
+
+	return countMetric
+}
+
+func (h handler) slowLogEnabled() (countMetric prometheus.Gauge) {
+
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "slowlog", Help: "shows whether slow log is enabled or not."})
+
+	for _, v := range h.dbInfo.Params {
+		if *v.ParameterName == "slow_query_log" {
+			if *v.ParameterValue == "1" {
+				// How to report this fact in my prom handler?
+				log.Info("SLOW QUERY ENABLED")
+				countMetric.Set(1)
+
+			}
+		}
+		// log.Infof("%d: %s", i, *v.ParameterName)
+
+	}
 
 	return countMetric
 }
@@ -305,21 +342,5 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 }
 
 func (h handler) describe(w http.ResponseWriter, r *http.Request) {
-	rdsCluster, err := h.describeCluster()
-	if err != nil {
-		log.WithError(err).Error("failed to find database info")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-
-	for _, v := range rdsCluster.Params {
-		if *v.ParameterName == "slow_query_log" {
-			if *v.ParameterValue == "1" {
-				// How to report this fact in my prom handler?
-				log.Info("SLOW QUERY ENABLED")
-			}
-		}
-		// log.Infof("%d: %s", i, *v.ParameterName)
-
-	}
-	response.JSON(w, rdsCluster)
+	response.JSON(w, h.dbInfo)
 }
