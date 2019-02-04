@@ -15,3 +15,5 @@ We want to capture across our uneet-{dev,demo,prod} accounts:
 * general_log - whether general log is enabled
 * cluster_endpoint - so we know what the cluster endpoint URL is
 * backtrack - if we can back track and what is the window
+
+https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_LogAccess.Concepts.MySQL.html

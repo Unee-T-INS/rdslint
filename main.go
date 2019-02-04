@@ -310,5 +310,16 @@ func (h handler) describe(w http.ResponseWriter, r *http.Request) {
 		log.WithError(err).Error("failed to find database info")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+
+	for _, v := range rdsCluster.Params {
+		if *v.ParameterName == "slow_query_log" {
+			if *v.ParameterValue == "1" {
+				// How to report this fact in my prom handler?
+				log.Info("SLOW QUERY ENABLED")
+			}
+		}
+		// log.Infof("%d: %s", i, *v.ParameterName)
+
+	}
 	response.JSON(w, rdsCluster)
 }
