@@ -54,7 +54,7 @@ func init() {
 // New setups the configuration assuming various parameters have been setup in the AWS account
 func New() (h handler, err error) {
 
-	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-dev"))
+	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-prod"))
 	if err != nil {
 		log.WithError(err).Fatal("setting up credentials")
 		return
@@ -159,6 +159,7 @@ func (h handler) schemaversion() (version string) {
 			log.WithError(err).Error("failed to scan version")
 		}
 	}
+	log.Infof("Parsed version %s", version)
 	return version
 
 }
@@ -197,7 +198,7 @@ func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 			log.WithError(err).Error("failed to scan count")
 		}
 	}
-	log.Infof("Count: %d", count)
+	log.Infof("Count: %f", count)
 
 	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "user_group_map_total", Help: "shows the number of rows in the user_group_map table."})
