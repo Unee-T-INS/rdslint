@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/gorilla/mux"
+	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tj/go/http/response"
@@ -19,8 +20,6 @@ import (
 
 	"github.com/apex/log"
 	jsonhandler "github.com/apex/log/handlers/json"
-
-	"database/sql"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -42,7 +41,7 @@ type handler struct {
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
 	APIAccessToken string
 	mysqlhost      string
-	db             *sql.DB
+	db             *sqlx.DB
 	dbInfo         dbinfo
 }
 
@@ -82,7 +81,7 @@ func New() (h handler, err error) {
 		e.GetSecret("MYSQL_PASSWORD"),
 		h.mysqlhost)
 
-	h.db, err = sql.Open("mysql", h.DSN)
+	h.db, err = sqlx.Open("mysql", h.DSN)
 	if err != nil {
 		log.WithError(err).Fatal("error opening database")
 		return
@@ -160,65 +159,33 @@ func (h handler) ping(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h handler) schemaversion() (version string) {
-
-	rows, err := h.db.Query("SET @highest_id = (SELECT MAX(`id`) FROM `ut_db_schema_version`); SELECT `schema_version` FROM `ut_db_schema_version` WHERE `id` = @highest_id;")
+	err := h.db.Get(&version, "SET @highest_id = (SELECT MAX(`id`) FROM `ut_db_schema_version`); SELECT `schema_version` FROM `ut_db_schema_version` WHERE `id` = @highest_id;")
 	if err != nil {
-		log.WithError(err).Error("failed to open database")
+		log.WithError(err).Error("failed to get unee-t version")
 		return
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		if err := rows.Scan(&version); err != nil {
-			log.WithError(err).Error("failed to scan version")
-		}
-	}
-	log.Infof("Parsed version %s", version)
 	return version
-
 }
 
 func (h handler) aversion() (aversion string) {
-
-	rows, err := h.db.Query("select AURORA_VERSION()")
+	err := h.db.Get(&aversion, "select AURORA_VERSION()")
 	if err != nil {
-		log.WithError(err).Error("failed to open database")
+		log.WithError(err).Error("failed to get AWS Aurora version")
 		return
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		if err := rows.Scan(&aversion); err != nil {
-			log.WithError(err).Error("failed to scan version")
-		}
-	}
 	return aversion
-
 }
 
 func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
-	rows, err := h.db.Query("select COUNT(*) from user_group_map")
+	var count float64
+	err := h.db.Get(&count, "select COUNT(*) from user_group_map")
 	if err != nil {
-		log.WithError(err).Error("failed to open database")
+		log.WithError(err).Error("failed to get count")
 		return
 	}
-	defer rows.Close()
-
-	// Would be nice to just be an int
-	var count float64
-
-	for rows.Next() {
-		if err := rows.Scan(&count); err != nil {
-			log.WithError(err).Error("failed to scan count")
-		}
-	}
 	log.Infof("Count: %f", count)
-
-	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "user_group_map_total", Help: "shows the number of rows in the user_group_map table."})
-
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "user_group_map_total", Help: "shows the number of rows in the user_group_map table."})
 	countMetric.Set(count)
-
 	return countMetric
 }
 
