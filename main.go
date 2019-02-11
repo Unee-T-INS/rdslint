@@ -29,7 +29,6 @@ import (
 var (
 	version = "dev"
 	commit  = "none"
-	date    = "unknown"
 )
 
 type dbinfo struct {
@@ -131,10 +130,11 @@ func main() {
 	// TODO: Implement a collector
 	// i.e. I am using the "direct instrumentation" approach atm
 	// https://github.com/prometheus/docs/blob/master/content/docs/instrumenting/writing_exporters.md#collectors
+	// but it's lambda, so can we assume it goes cold ??
 	prometheus.MustRegister(dbcheck)
 	prometheus.MustRegister(h.userGroupMapCount())
 	prometheus.MustRegister(h.slowLogEnabled())
-	prometheus.MustRegister(h.checkMyAssumption())
+	prometheus.MustRegister(h.iamEnabled())
 
 	addr := ":" + os.Getenv("PORT")
 	app := h.BasicEngine()
@@ -222,32 +222,30 @@ func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 	return countMetric
 }
 
-func (h handler) checkMyAssumption() (countMetric prometheus.Gauge) {
-
-	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "assumption", Help: "shows zero... hopefully."})
-
+func (h handler) iamEnabled() (countMetric prometheus.Gauge) {
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "iam", Help: "shows whether IAM auth is enabled or not."})
+	for _, db := range h.dbInfo.DBs {
+		if *db.IAMDatabaseAuthenticationEnabled {
+			log.WithField("endpoint", db.Endpoint.Address).Info("IAM ENABLED")
+			countMetric.Set(1)
+		} else {
+			log.WithField("endpoint", db.Endpoint.Address).Warn("IAM NOT enabled")
+		}
+	}
 	return countMetric
 }
 
 func (h handler) slowLogEnabled() (countMetric prometheus.Gauge) {
-
-	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "slowlog", Help: "shows whether slow log is enabled or not."})
-
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "slowlog", Help: "shows whether slow log is enabled or not."})
 	for _, v := range h.dbInfo.Params {
 		if *v.ParameterName == "slow_query_log" {
 			if *v.ParameterValue == "1" {
 				// How to report this fact in my prom handler?
 				log.Info("SLOW QUERY ENABLED")
 				countMetric.Set(1)
-
 			}
 		}
-		// log.Infof("%d: %s", i, *v.ParameterName)
-
 	}
-
 	return countMetric
 }
 
