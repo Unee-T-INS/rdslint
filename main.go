@@ -123,10 +123,13 @@ func main() {
 			Name: "dbinfo",
 			Help: "A metric with a constant '1' value labeled by the Unee-T schema version, Aurora version and lambda commit.",
 		},
-		[]string{"schemaversion", "auroraversion", "commit", "engineversion", "instanceclass"},
+		[]string{"schemaversion", "auroraversion", "commit", "engineversion", "instanceclass", "endpoint", "innodb_file_format", "status"},
 	)
 
-	dbcheck.WithLabelValues(h.schemaversion(), h.aversion(), commit, h.engineVersion(), h.instanceClass()).Set(1)
+	dbcheck.WithLabelValues(h.schemaversion(), h.aversion(), commit, h.engineVersion(), h.instanceClass(),
+		*h.dbInfo.Cluster.Endpoint, h.innodbFileFormat(),
+		// https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.DBInstance.Status.html
+		*h.dbInfo.Cluster.Status).Set(1)
 
 	// TODO: Implement a collector
 	// i.e. I am using the "direct instrumentation" approach atm
@@ -170,6 +173,15 @@ func (h handler) ping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "OK")
+}
+
+func (h handler) innodbFileFormat() (format string) {
+	err := h.db.Get(&format, "SELECT @@innodb_file_format")
+	if err != nil {
+		log.WithError(err).Error("failed to get innodb_file_format version")
+		return
+	}
+	return format
 }
 
 func (h handler) schemaversion() (version string) {
@@ -223,6 +235,15 @@ func (h handler) engineVersion() string {
 
 func (h handler) insync() (countMetric prometheus.Gauge) {
 	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "insync", Help: "shows whether we are in-sync with the parameter groups"})
+	for _, db := range h.dbInfo.Cluster.DBClusterMembers {
+		if *db.DBClusterParameterGroupStatus != "in-sync" {
+			log.WithFields(log.Fields{
+				"db": db.DBInstanceIdentifier,
+			}).Warn("not in-sync")
+			return countMetric
+		}
+	}
+
 	for _, db := range h.dbInfo.DBs {
 		for _, groups := range db.DBParameterGroups {
 			if *groups.ParameterApplyStatus != "in-sync" {
