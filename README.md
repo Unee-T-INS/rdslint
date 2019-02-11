@@ -2,7 +2,7 @@ We want to capture across our uneet-{dev,demo,prod} accounts:
 
 - [ ] uptime
 - [X] engineversion
-- [ ] dbInstanceClass
+- [X] dbInstanceClass
 - [X] user_group_map count - so we know if there has been any truncation issues
 - [X] schema_version - so we know what version of the data structure we are running
 - [X] aurora_version - so we know what version of the database we are running
@@ -15,7 +15,7 @@ We want to capture across our uneet-{dev,demo,prod} accounts:
 - [ ] general_log - whether general log is enabled
 - [ ] cluster_endpoint - so we know what the cluster endpoint URL is
 - [ ] backtrack - if we can back track and what is the window
-- [ ] cloudwatch - check whether logs are being output to CloudWatch
+- [ ] cloudwatch - check whether logs are being sent to CloudWatch
 - [ ] check [lambda_async](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Integrating.Lambda.html) is present
 - [ ] check triggers are enabled
 - [ ] check innodb_file_format

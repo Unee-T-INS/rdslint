@@ -119,10 +119,10 @@ func main() {
 			Name: "dbinfo",
 			Help: "A metric with a constant '1' value labeled by the Unee-T schema version, Aurora version and lambda commit.",
 		},
-		[]string{"schemaversion", "auroraversion", "commit", "engineversion"},
+		[]string{"schemaversion", "auroraversion", "commit", "engineversion", "instanceclass"},
 	)
 
-	dbcheck.WithLabelValues(h.schemaversion(), h.aversion(), commit, h.engineVersion()).Set(1)
+	dbcheck.WithLabelValues(h.schemaversion(), h.aversion(), commit, h.engineVersion(), h.instanceClass()).Set(1)
 
 	// TODO: Implement a collector
 	// i.e. I am using the "direct instrumentation" approach atm
@@ -185,6 +185,15 @@ func (h handler) userGroupMapCount() (countMetric prometheus.Gauge) {
 	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "user_group_map_total", Help: "shows the number of rows in the user_group_map table."})
 	countMetric.Set(count)
 	return countMetric
+}
+
+func (h handler) instanceClass() string {
+	for _, db := range h.dbInfo.DBs {
+		if *db.DBInstanceClass != "" {
+			return *db.DBInstanceClass
+		}
+	}
+	return ""
 }
 
 func (h handler) engineVersion() string {
