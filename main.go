@@ -136,6 +136,7 @@ func main() {
 	prometheus.MustRegister(h.userGroupMapCount())
 	prometheus.MustRegister(h.slowLogEnabled())
 	prometheus.MustRegister(h.iamEnabled())
+	prometheus.MustRegister(h.insync())
 
 	addr := ":" + os.Getenv("PORT")
 	app := h.BasicEngine()
@@ -218,6 +219,23 @@ func (h handler) engineVersion() string {
 		}
 	}
 	return ""
+}
+
+func (h handler) insync() (countMetric prometheus.Gauge) {
+	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "insync", Help: "shows whether we are in-sync with the parameter groups"})
+	for _, db := range h.dbInfo.DBs {
+		for _, groups := range db.DBParameterGroups {
+			if *groups.ParameterApplyStatus != "in-sync" {
+				log.WithFields(log.Fields{
+					"db":         db.DBInstanceIdentifier,
+					"paramgroup": groups.DBParameterGroupName,
+				}).Warn("not in-sync")
+				return countMetric
+			}
+		}
+	}
+	countMetric.Set(1)
+	return countMetric
 }
 
 func (h handler) iamEnabled() (countMetric prometheus.Gauge) {
