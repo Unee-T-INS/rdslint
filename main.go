@@ -105,7 +105,15 @@ func (h handler) BasicEngine() http.Handler {
 	app.HandleFunc("/call", h.call).Methods("GET")
 	app.HandleFunc("/describe", func(w http.ResponseWriter, r *http.Request) { response.JSON(w, h.dbInfo) }).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
-	return app
+	log.Infof("STAGE: %s", os.Getenv("UP_STAGE"))
+
+	if os.Getenv("UP_STAGE") == "" {
+		// local dev
+		return app
+	} else {
+		return env.Protect(app, h.APIAccessToken)
+	}
+
 }
 
 func main() {
