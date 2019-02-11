@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/endpoints"
@@ -41,6 +42,7 @@ type handler struct {
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
 	APIAccessToken string
 	mysqlhost      string
+	AccountID      string
 	db             *sqlx.DB
 	dbInfo         dbinfo
 }
@@ -72,6 +74,7 @@ func New() (h handler, err error) {
 
 	h = handler{
 		AWSCfg:         cfg,
+		AccountID:      e.AccountID,
 		mysqlhost:      e.Udomain("auroradb"),
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
@@ -99,7 +102,8 @@ func New() (h handler, err error) {
 func (h handler) BasicEngine() http.Handler {
 	app := mux.NewRouter()
 	app.HandleFunc("/", h.ping).Methods("GET")
-	app.HandleFunc("/describe", h.describe).Methods("GET")
+	app.HandleFunc("/call", h.call).Methods("GET")
+	app.HandleFunc("/describe", func(w http.ResponseWriter, r *http.Request) { response.JSON(w, h.dbInfo) }).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
 	return app
 }
@@ -140,6 +144,17 @@ func main() {
 		log.WithError(err).Fatal("error listening")
 	}
 
+}
+
+func (h handler) call(w http.ResponseWriter, r *http.Request) {
+	_, err := h.db.Query(fmt.Sprintf(`CALL mysql.lambda_async( 'arn:aws:lambda:ap-southeast-1:%s:function:alambda_simple', '{ "heartbeat": "%s"}' )`,
+		h.AccountID, time.Now()))
+	if err != nil {
+		log.WithError(err).Error("failed to make mysql.lambda_async call")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "OK")
 }
 
 func (h handler) ping(w http.ResponseWriter, r *http.Request) {
@@ -320,8 +335,4 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 		}
 	}
 	return dbInfo, fmt.Errorf("no cluster info found for %s", h.mysqlhost)
-}
-
-func (h handler) describe(w http.ResponseWriter, r *http.Request) {
-	response.JSON(w, h.dbInfo)
 }
