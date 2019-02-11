@@ -1,9 +1,9 @@
 We want to capture across our uneet-{dev,demo,prod} accounts:
 
 - [ ] uptime
-- [ ] engineversion
+- [X] engineversion
 - [ ] dbInstanceClass
-- [ ] user_group_map count - so we know if there has been any truncation issues
+- [X] user_group_map count - so we know if there has been any truncation issues
 - [X] schema_version - so we know what version of the data structure we are running
 - [X] aurora_version - so we know what version of the database we are running
 - [ ] snapshot_time (PreferredBackupWindow) - so we know at what time snapshot are being taken
