@@ -302,8 +302,14 @@ func (h handler) lookupHostedZone() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	for _, v := range hzs.HostedZones {
 		name := strings.TrimRight(*v.Name, ".")
+		log.WithFields(log.Fields{
+			"name":      name,
+			"mysqlhost": h.mysqlhost,
+		}).Info("looking up")
+
 		if h.mysqlhost[len(h.mysqlhost)-len(name):] == name {
 			return *v.Id, err
 		}
@@ -322,9 +328,10 @@ func (h handler) lookupClusterName() (string, error) {
 	})
 	listrecords, err := req.Send()
 	for _, v := range listrecords.ResourceRecordSets {
-		// log.Infof("Name: %s", *v.Name)
+		log.Infof("Name: %s", *v.Name)
 		if *v.Name == h.mysqlhost+"." {
-			return strings.TrimRight(*v.AliasTarget.DNSName, "."), err
+			log.Infof("DEBUG: %#v", v)
+			return *v.ResourceRecords[0].Value, err
 		}
 	}
 	return "", fmt.Errorf("no alias found for %s", h.mysqlhost)

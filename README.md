@@ -22,3 +22,10 @@ We want to capture across our uneet-{dev,demo,prod} accounts:
 - [X] check innodb_file_format
 
 https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_LogAccess.Concepts.MySQL.html
+
+# Policy notes
+
+Requires:
+
+* AmazonRoute53ReadOnlyAccess
+* AmazonRDSReadOnlyAccess
