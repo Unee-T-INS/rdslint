@@ -160,6 +160,15 @@ func main() {
 }
 
 func (h handler) checks(w http.ResponseWriter, r *http.Request) {
+	type CreateProcedure struct {
+		Procedure           string `db:"Procedure"`
+		SqlMode             string `db:"sql_mode"`
+		Source              string `db:"Create Procedure"`
+		CharacterSetClient  string `db:"character_set_client"`
+		CollationConnection string `db:"collation_connection"`
+		DatabaseCollation   string `db:"Database Collation"`
+	}
+
 	type Procedures struct {
 		Db                  string    `db:"Db"`
 		Name                string    `db:"Name"`
@@ -176,15 +185,25 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 	pp := []Procedures{}
 	err := h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
 	if err != nil {
-		log.WithError(err).Error("failed to make mysql.lambda_async call")
+		log.WithError(err).Error("failed to make SHOW PROCEDURE STATUS listing")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Infof("Results: %#v", pp)
+	// log.Infof("Results: %#v", pp)
 	var output string
 	for _, v := range pp {
 		if strings.HasPrefix(v.Name, "lambda") {
+
+			var src CreateProcedure
+			err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(src)
+			if err != nil {
+				log.WithError(err).Error("failed to get procedure source")
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
 			output += v.Name + "\n"
+			output += src.Source + "\n"
 		}
 	}
 	fmt.Fprintf(w, output)
