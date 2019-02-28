@@ -79,7 +79,7 @@ func New() (h handler, err error) {
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
 
-	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL",
+	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL",
 		e.GetSecret("MYSQL_USER"),
 		e.GetSecret("MYSQL_PASSWORD"),
 		h.mysqlhost)
@@ -103,6 +103,7 @@ func (h handler) BasicEngine() http.Handler {
 	app := mux.NewRouter()
 	app.HandleFunc("/", h.ping).Methods("GET")
 	app.HandleFunc("/call", h.call).Methods("GET")
+	app.HandleFunc("/checks", h.checks).Methods("GET")
 	app.HandleFunc("/describe", func(w http.ResponseWriter, r *http.Request) { response.JSON(w, h.dbInfo) }).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
 	log.Infof("STAGE: %s", os.Getenv("UP_STAGE"))
@@ -156,6 +157,37 @@ func main() {
 		log.WithError(err).Fatal("error listening")
 	}
 
+}
+
+func (h handler) checks(w http.ResponseWriter, r *http.Request) {
+	type Procedures struct {
+		Db                  string    `db:"Db"`
+		Name                string    `db:"Name"`
+		Definer             string    `db:"Definer"`
+		Type                string    `db:"Type"`
+		Modified            time.Time `db:"Modified"`
+		Created             time.Time `db:"Created"`
+		SecurityType        string    `db:"Security_type"`
+		Comment             string    `db:"Comment"`
+		CharacterSetClient  string    `db:"character_set_client"`
+		CollationConnection string    `db:"collation_connection"`
+		DatabaseCollation   string    `db:"Database Collation"`
+	}
+	pp := []Procedures{}
+	err := h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
+	if err != nil {
+		log.WithError(err).Error("failed to make mysql.lambda_async call")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Infof("Results: %#v", pp)
+	var output string
+	for _, v := range pp {
+		if strings.HasPrefix(v.Name, "lambda") {
+			output += v.Name + "\n"
+		}
+	}
+	fmt.Fprintf(w, output)
 }
 
 func (h handler) call(w http.ResponseWriter, r *http.Request) {
