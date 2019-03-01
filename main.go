@@ -1,9 +1,11 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -30,6 +32,31 @@ var (
 	version = "dev"
 	commit  = "none"
 )
+
+var myExp = regexp.MustCompile(`(?m)arn:aws:lambda:ap-southeast-1:(?P<account>\d+):function:(?P<fn>\w+)`)
+
+type CreateProcedure struct {
+	Procedure           string         `db:"Procedure"`
+	SqlMode             string         `db:"sql_mode"`
+	Source              sql.NullString `db:"Create Procedure"`
+	CharacterSetClient  string         `db:"character_set_client"`
+	CollationConnection string         `db:"collation_connection"`
+	DatabaseCollation   string         `db:"Database Collation"`
+}
+
+type Procedures struct {
+	Db                  string    `db:"Db"`
+	Name                string    `db:"Name"`
+	Definer             string    `db:"Definer"`
+	Type                string    `db:"Type"`
+	Modified            time.Time `db:"Modified"`
+	Created             time.Time `db:"Created"`
+	SecurityType        string    `db:"Security_type"`
+	Comment             string    `db:"Comment"`
+	CharacterSetClient  string    `db:"character_set_client"`
+	CollationConnection string    `db:"collation_connection"`
+	DatabaseCollation   string    `db:"Database Collation"`
+}
 
 type dbinfo struct {
 	Cluster rds.DBCluster
@@ -80,8 +107,8 @@ func New() (h handler, err error) {
 	}
 
 	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL",
-		e.GetSecret("MYSQL_USER"),
-		e.GetSecret("MYSQL_PASSWORD"),
+		"root",
+		e.GetSecret("MYSQL_ROOT_PASSWORD"),
 		h.mysqlhost)
 
 	h.db, err = sqlx.Open("mysql", h.DSN)
@@ -111,9 +138,9 @@ func (h handler) BasicEngine() http.Handler {
 	if os.Getenv("UP_STAGE") == "" {
 		// local dev
 		return app
-	} else {
-		return env.Protect(app, h.APIAccessToken)
 	}
+
+	return env.Protect(app, h.APIAccessToken)
 
 }
 
@@ -160,28 +187,6 @@ func main() {
 }
 
 func (h handler) checks(w http.ResponseWriter, r *http.Request) {
-	type CreateProcedure struct {
-		Procedure           string `db:"Procedure"`
-		SqlMode             string `db:"sql_mode"`
-		Source              string `db:"Create Procedure"`
-		CharacterSetClient  string `db:"character_set_client"`
-		CollationConnection string `db:"collation_connection"`
-		DatabaseCollation   string `db:"Database Collation"`
-	}
-
-	type Procedures struct {
-		Db                  string    `db:"Db"`
-		Name                string    `db:"Name"`
-		Definer             string    `db:"Definer"`
-		Type                string    `db:"Type"`
-		Modified            time.Time `db:"Modified"`
-		Created             time.Time `db:"Created"`
-		SecurityType        string    `db:"Security_type"`
-		Comment             string    `db:"Comment"`
-		CharacterSetClient  string    `db:"character_set_client"`
-		CollationConnection string    `db:"collation_connection"`
-		DatabaseCollation   string    `db:"Database Collation"`
-	}
 	pp := []Procedures{}
 	err := h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
 	if err != nil {
@@ -192,20 +197,38 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 	// log.Infof("Results: %#v", pp)
 	var output string
 	for _, v := range pp {
-		if strings.HasPrefix(v.Name, "lambda") {
-
-			var src CreateProcedure
-			err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(src)
-			if err != nil {
-				log.WithError(err).Error("failed to get procedure source")
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			output += v.Name + "\n"
-			output += src.Source + "\n"
+		if !strings.HasPrefix(v.Name, "lambda") {
+			continue
 		}
+
+		if v.Name == "lambda_async" {
+			continue
+		}
+
+		var src CreateProcedure
+		// There must be an easier way
+		err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(&src.Procedure, &src.SqlMode, &src.Source, &src.CharacterSetClient, &src.CollationConnection, &src.DatabaseCollation)
+		if err != nil {
+			log.WithError(err).Error("failed to get procedure source")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		result := findNamedMatches(myExp, src.Source.String)
+		log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
+
+		// log.WithField("name", v.Name).Infof("src: %#v", &src.Source)
+		output += fmt.Sprintf("<h1>%s</h1>\n", v.Name)
+		if result["fn"] == "alambda_simple" {
+			if result["account"] != h.AccountID {
+				output += fmt.Sprintf("<h2 style='color: red;'>Account ID %s != %s</h2>\n", result["account"], h.AccountID)
+			}
+		} else {
+			output += fmt.Sprintf("<h2 style='color: yellow;'>Function %s != %s</h2>\n", result["fn"], "alambda_simple")
+		}
+		output += fmt.Sprintf("<pre>%s</pre>\n", src.Source.String)
 	}
+	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, output)
 }
 
@@ -440,4 +463,14 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 		}
 	}
 	return dbInfo, fmt.Errorf("no cluster info found for %s", h.mysqlhost)
+}
+
+func findNamedMatches(regex *regexp.Regexp, str string) map[string]string {
+	match := regex.FindStringSubmatch(str)
+
+	results := map[string]string{}
+	for i, name := range match {
+		results[regex.SubexpNames()[i]] = name
+	}
+	return results
 }
