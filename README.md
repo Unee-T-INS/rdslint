@@ -12,7 +12,7 @@ We want to capture across our uneet-{dev,demo,prod} accounts:
 - [X] insync - so we know if all our settings are in affect
 - [ ] binlog_time - whether binlogs are enabled and how far they go
 - [X] iam_auth - whether IAM auth is enabled
-- [X] slow_log - whether slow log is enabled
+- [X] slow_log - whether slow log is enabled, with log_output & log_queries_not_using_indexes
 - [ ] general_log - whether general log is enabled
 - [X] cluster_endpoint - so we know what the cluster endpoint URL is
 - [ ] backtrack - if we can back track and what is the window

@@ -159,11 +159,23 @@ func main() {
 			Name: "dbinfo",
 			Help: "A metric with a constant '1' value labeled by the Unee-T schema version, Aurora version and lambda commit.",
 		},
-		[]string{"schemaversion", "auroraversion", "commit", "engineversion", "instanceclass", "endpoint", "innodb_file_format", "status"},
+		[]string{"schemaversion",
+			"auroraversion",
+			"commit",
+			"engineversion",
+			"instanceclass",
+			"endpoint",
+			"innodb_file_format",
+			"status"},
 	)
 
-	dbcheck.WithLabelValues(h.schemaversion(), h.aversion(), commit, h.engineVersion(), h.instanceClass(),
-		*h.dbInfo.Cluster.Endpoint, h.innodbFileFormat(),
+	dbcheck.WithLabelValues(h.schemaversion(),
+		h.aversion(),
+		commit,
+		h.engineVersion(),
+		h.instanceClass(),
+		*h.dbInfo.Cluster.Endpoint,
+		h.innodbFileFormat(),
 		// https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.DBInstance.Status.html
 		*h.dbInfo.Cluster.Status).Set(1)
 
@@ -196,7 +208,7 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 	}
 	// log.Infof("Results: %#v", pp)
 	var output string
-	for _, v := range pp {
+	for i, v := range pp {
 		if !strings.HasPrefix(v.Name, "lambda") {
 			continue
 		}
@@ -218,7 +230,7 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
 
 		// log.WithField("name", v.Name).Infof("src: %#v", &src.Source)
-		output += fmt.Sprintf("<h1>%s</h1>\n", v.Name)
+		output += fmt.Sprintf("<h1>%d: %s</h1>\n", i, v.Name)
 		if result["fn"] == "alambda_simple" {
 			if result["account"] != h.AccountID {
 				output += fmt.Sprintf("<h2 style='color: red;'>Account ID %s != %s</h2>\n", result["account"], h.AccountID)
@@ -354,18 +366,34 @@ func (h handler) iamEnabled() (countMetric prometheus.Gauge) {
 	return countMetric
 }
 
-func (h handler) slowLogEnabled() (countMetric prometheus.Gauge) {
-	countMetric = prometheus.NewGauge(prometheus.GaugeOpts{Name: "slowlog", Help: "shows whether slow log is enabled or not."})
+func (h handler) slowLogEnabled() *prometheus.GaugeVec {
+	slowcheck := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "slowlog",
+			Help: "A metric with a constant '1' value labeled with slow log lint.",
+		},
+		[]string{
+			"enabled",
+			"log_output",
+			"log_queries_not_using_indexes"},
+	)
+
+	slowcheck.WithLabelValues(
+		h.lookup("slow_query_log"),
+		h.lookup("log_output"),
+		h.lookup("log_queries_not_using_indexes"),
+	).Set(1)
+
+	return slowcheck
+}
+
+func (h handler) lookup(key string) string {
 	for _, v := range h.dbInfo.Params {
-		if *v.ParameterName == "slow_query_log" {
-			if *v.ParameterValue == "1" {
-				// How to report this fact in my prom handler?
-				log.Info("SLOW QUERY ENABLED")
-				countMetric.Set(1)
-			}
+		if *v.ParameterName == key {
+			return *v.ParameterValue
 		}
 	}
-	return countMetric
+	return ""
 }
 
 func (h handler) lookupHostedZone() (string, error) {
