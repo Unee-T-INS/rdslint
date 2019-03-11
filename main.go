@@ -390,7 +390,10 @@ func (h handler) slowLogEnabled() *prometheus.GaugeVec {
 func (h handler) lookup(key string) string {
 	for _, v := range h.dbInfo.Params {
 		if *v.ParameterName == key {
-			return *v.ParameterValue
+			log.Infof("Looking up key: %s", key)
+			if v.ParameterValue != nil {
+				return *v.ParameterValue
+			}
 		}
 	}
 	return ""
