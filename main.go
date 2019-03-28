@@ -262,6 +262,7 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 			resp, err := req.Send()
 			if err != nil {
 				log.WithError(err).Error("failed to get policies")
+				return
 			}
 			log.Infof("list-attached-role-policies: %#v", resp)
 			for _, v := range resp.AttachedPolicies {

@@ -21,6 +21,13 @@
         "Action": [
           "ssm:GetParameter"
         ]
+      },
+      {
+        "Effect": "Allow",
+        "Resource": "*",
+        "Action": [
+          "iam:ListAttachedRolePolicies"
+        ]
       }
     ]
   },
