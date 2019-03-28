@@ -220,6 +220,27 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var grants []string
+	err = h.db.Select(&grants, fmt.Sprintf("show grants for %s", h.LambdaInvoker))
+	if err != nil {
+		log.WithError(err).Errorf("failed to get grants for %s", h.LambdaInvoker)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Infof("Grants: %#v", grants)
+	var executePerms bool
+	for _, v := range grants {
+		log.Infof("Checking: %q", v)
+		if v == fmt.Sprintf("GRANT EXECUTE ON *.* TO '%s'@'%%'", h.LambdaInvoker) {
+			executePerms = true
+			break
+		}
+	}
+	if !executePerms {
+		http.Error(w, fmt.Sprintf("LAMBDA_INVOKER_USERNAME: %s does not have execute permissions", h.LambdaInvoker), http.StatusInternalServerError)
+		return
+	}
+
 	pp := []Procedures{}
 	err = h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
 	if err != nil {
