@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/aws/endpoints"
 	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
 	"github.com/gorilla/mux"
@@ -89,7 +91,7 @@ func init() {
 // New setups the configuration assuming various parameters have been setup in the AWS account
 func New() (h handler, err error) {
 
-	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-dev"))
+	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-prod"))
 	if err != nil {
 		log.WithError(err).Fatal("setting up credentials")
 		return
@@ -241,6 +243,44 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var lambdaAccess bool
+	for _, v := range h.dbInfo.Cluster.AssociatedRoles {
+		log.WithField("status", v.Status).Infof("Role: %#v", v)
+		if *v.Status == "ACTIVE" {
+			a, err := arn.Parse(*v.RoleArn)
+			if err != nil {
+				log.WithError(err).Errorf("failed to get arn for %s", *v.RoleArn)
+				continue
+			}
+			log.Infof("Checking RoleArn: %s has lambda perms", a.Resource)
+			i := iam.New(h.AWSCfg)
+			// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/iam#IAM.ListAttachedRolePoliciesRequest
+			req := i.ListAttachedRolePoliciesRequest(&iam.ListAttachedRolePoliciesInput{
+				RoleName: aws.String(strings.TrimPrefix(a.Resource, "role/")),
+			})
+			// aws --profile uneet-prod iam list-attached-role-policies --role-name Aurora_access_to_lambda
+			resp, err := req.Send()
+			if err != nil {
+				log.WithError(err).Error("failed to get policies")
+			}
+			log.Infof("list-attached-role-policies: %#v", resp)
+			for _, v := range resp.AttachedPolicies {
+				log.Infof("Policy: %#v", v)
+				if *v.PolicyArn == "arn:aws:iam::aws:policy/AWSLambdaFullAccess" {
+					lambdaAccess = true
+					break
+				}
+			}
+		} else {
+			log.Warnf("%#v not ACTIVE", v)
+		}
+	}
+
+	if !lambdaAccess {
+		http.Error(w, "Active Cluster.AssociatedRoles is missing the AWSLambdaFullAccess policy", http.StatusInternalServerError)
+		return
+	}
+
 	pp := []Procedures{}
 	err = h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
 	if err != nil {
@@ -263,13 +303,12 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		// There must be an easier way
 		err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(&src.Procedure, &src.SqlMode, &src.Source, &src.CharacterSetClient, &src.CollationConnection, &src.DatabaseCollation)
 		if err != nil {
-			log.WithError(err).Error("failed to get procedure source")
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			log.WithError(err).WithField("name", v.Name).Error("failed to get procedure source")
+			continue
 		}
 
 		result := findNamedMatches(myExp, src.Source.String)
-		log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
+		// log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
 
 		// log.WithField("name", v.Name).Infof("src: %#v", &src.Source)
 		output += fmt.Sprintf("<h1>%d: %s</h1>\n", i, v.Name)
