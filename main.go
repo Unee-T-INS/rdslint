@@ -305,6 +305,7 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(&src.Procedure, &src.SqlMode, &src.Source, &src.CharacterSetClient, &src.CollationConnection, &src.DatabaseCollation)
 		if err != nil {
 			log.WithError(err).WithField("name", v.Name).Error("failed to get procedure source")
+			output += fmt.Sprintf("<h1 style='color: orange;'>%d: No source found for %s</h1>\n", i, v.Name)
 			continue
 		}
 
