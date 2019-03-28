@@ -31,10 +31,8 @@ matrix:
         on:
           branch: master
     - env: DEPLOY=prod
-      if: tag IS present
+      if: branch = master
       deploy:
         provider: script
         skip_cleanup: true
         script: AWS_ACCESS_KEY_ID=$AWS_192458993663_ID AWS_SECRET_ACCESS_KEY=$AWS_192458993663_SECRET make prod
-        on:
-          tags: true
