@@ -68,6 +68,7 @@ type handler struct {
 	AWSCfg         aws.Config
 	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
 	APIAccessToken string
+	LambdaInvoker  string
 	mysqlhost      string
 	AccountID      string
 	db             *sqlx.DB
@@ -102,6 +103,7 @@ func New() (h handler, err error) {
 	h = handler{
 		AWSCfg:         cfg,
 		AccountID:      e.AccountID,
+		LambdaInvoker:  e.GetSecret("LAMBDA_INVOKER_USERNAME"),
 		mysqlhost:      e.Udomain("auroradb"),
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
@@ -136,7 +138,7 @@ func (h handler) BasicEngine() http.Handler {
 	log.Infof("STAGE: %s", os.Getenv("UP_STAGE"))
 
 	if os.Getenv("UP_STAGE") == "" {
-		// local dev
+		// local dev, get around permissions
 		return app
 	}
 
@@ -199,8 +201,27 @@ func main() {
 }
 
 func (h handler) checks(w http.ResponseWriter, r *http.Request) {
+
+	if h.LambdaInvoker == "" {
+		http.Error(w, "LAMBDA_INVOKER_USERNAME is unset", http.StatusInternalServerError)
+		return
+	}
+
+	var invokerExists bool
+	err := h.db.Get(&invokerExists, `SELECT EXISTS(SELECT 1 FROM mysql.user WHERE user = ?)`, h.LambdaInvoker)
+	if err != nil {
+		log.WithError(err).Errorf("failed to select %s", h.LambdaInvoker)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !invokerExists {
+		http.Error(w, fmt.Sprintf("LAMBDA_INVOKER_USERNAME: %s does not exist", h.LambdaInvoker), http.StatusInternalServerError)
+		return
+	}
+
 	pp := []Procedures{}
-	err := h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
+	err = h.db.Select(&pp, `SHOW PROCEDURE STATUS`)
 	if err != nil {
 		log.WithError(err).Error("failed to make SHOW PROCEDURE STATUS listing")
 		http.Error(w, err.Error(), http.StatusInternalServerError)

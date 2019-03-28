@@ -29,3 +29,45 @@ Requires:
 
 * AmazonRoute53ReadOnlyAccess
 * AmazonRDSReadOnlyAccess
+
+# TODO
+
+Perhaps not sent heartbeat for lambda_async and [check
+permissions](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Integrating.Lambda.html#AuroraMySQL.Integrating.NativeLambda)
+instead, i.e. check the role has been applied.
+
+A role's policy looks like:
+
+	{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Sid": "VisualEditor1",
+				"Effect": "Allow",
+				"Action": "lambda:*",
+				"Resource": "arn:aws:lambda:ap-southeast-1:812644853088:function:alambda_simple"
+			}
+		]
+	}
+
+
+Check for `lambda:*` in an attached role I guess!
+
+Also need to ensure the user has correct permissions:
+
+	mysql> GRANT EXECUTE ON *.* TO 'lambda_invoker'@'%';
+	Query OK, 0 rows affected (0.01 sec)
+
+Check user actually exists
+
+## Check lambda invoker user is in place in the parameter store
+
+	[hendry@t480s tests]$ ssm uneet-dev LAMBDA_INVOKER_USERNAME
+	aws --profile uneet-dev ssm get-parameters --names LAMBDA_INVOKER_USERNAME --with-decryption --query Parameters[0].Value --output text
+	lambda_invoker
+	[hendry@t480s tests]$ ssm uneet-demo LAMBDA_INVOKER_USERNAME
+	aws --profile uneet-demo ssm get-parameters --names LAMBDA_INVOKER_USERNAME --with-decryption --query Parameters[0].Value --output text
+	None
+	[hendry@t480s tests]$ ssm uneet-prod LAMBDA_INVOKER_USERNAME
+	aws --profile uneet-prod ssm get-parameters --names LAMBDA_INVOKER_USERNAME --with-decryption --query Parameters[0].Value --output text
+	None
