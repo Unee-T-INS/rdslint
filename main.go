@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"regexp"
@@ -68,7 +69,7 @@ type dbinfo struct {
 
 type handler struct {
 	AWSCfg         aws.Config
-	DSN            string // e.g. "bugzilla:secret@tcp(auroradb.dev.unee-t.com:3306)/bugzilla?multiStatements=true&sql_mode=TRADITIONAL"
+	DSN            string
 	APIAccessToken string
 	LambdaInvoker  string
 	mysqlhost      string
@@ -110,7 +111,7 @@ func New() (h handler, err error) {
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
 
-	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL",
+	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL&collation=utf8mb4_unicode_ci",
 		"root",
 		e.GetSecret("MYSQL_ROOT_PASSWORD"),
 		h.mysqlhost)
@@ -135,6 +136,7 @@ func (h handler) BasicEngine() http.Handler {
 	app.HandleFunc("/", h.ping).Methods("GET")
 	app.HandleFunc("/call", h.call).Methods("GET")
 	app.HandleFunc("/checks", h.checks).Methods("GET")
+	app.HandleFunc("/unicode", h.unicode).Methods("GET")
 	app.HandleFunc("/describe", func(w http.ResponseWriter, r *http.Request) { response.JSON(w, h.dbInfo) }).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
 	log.Infof("STAGE: %s", os.Getenv("UP_STAGE"))
@@ -200,6 +202,47 @@ func main() {
 		log.WithError(err).Fatal("error listening")
 	}
 
+}
+
+func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
+
+	type config struct {
+		Key   string `db:"Variable_name"`
+		Value string `db:"Value"`
+		Good  bool
+	}
+	var configuration []config
+	err := h.db.Select(&configuration, `show variables where variable_name like 'character\_set\_%' or variable_name like 'collation%';`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for i := 0; i < len(configuration); i++ {
+		if configuration[i].Value == "utf8mb4" || configuration[i].Value == "utf8mb4_unicode_ci" {
+			configuration[i].Good = true
+		}
+		if configuration[i].Key == "character_set_system" && configuration[i].Value == "utf8" {
+			configuration[i].Good = true
+		}
+		if configuration[i].Key == "character_set_filesystem" && configuration[i].Value == "binary" {
+			configuration[i].Good = true
+		}
+
+	}
+
+	var t = template.Must(template.New("").Parse(`<ol>
+{{- range . }}
+{{- if .Good }}
+<li>{{ .Key }} - {{ .Value }}</li>
+{{ else }}
+<li style="color: red">{{ .Key }} - {{ .Value }}</li>
+{{- end }}
+{{- end }}
+</ol>`))
+
+	w.Header().Set("Content-Type", "text/html")
+	t.Execute(w, configuration)
 }
 
 func (h handler) checks(w http.ResponseWriter, r *http.Request) {
