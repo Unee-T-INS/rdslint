@@ -302,6 +302,8 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 
 		var src CreateProcedure
 		// There must be an easier way
+		log.Infof("Switching to: %s", v.Db)
+		h.db.MustExec(fmt.Sprintf("use %s", v.Db))
 		err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(&src.Procedure, &src.SqlMode, &src.Source, &src.CharacterSetClient, &src.CollationConnection, &src.DatabaseCollation)
 		if err != nil {
 			log.WithError(err).WithField("name", v.Name).Error("failed to get procedure source")
