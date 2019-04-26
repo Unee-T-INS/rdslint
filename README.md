@@ -1,6 +1,8 @@
 We want to capture across our uneet-{dev,demo,prod} accounts:
 
 - [ ] uptime
+- [ ] check table id limits
+- [X] [unicode](https://github.com/unee-t/bz-database/issues/110) - utf8mb4 & utf8mb4_unicode_520_ci
 - [X] engineversion
 - [X] status
 - [X] dbInstanceClass

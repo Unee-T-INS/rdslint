@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 	"github.com/apex/log"
 	jsonhandler "github.com/apex/log/handlers/json"
+	texthandler "github.com/apex/log/handlers/text"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -45,6 +47,16 @@ type CreateProcedure struct {
 	CharacterSetClient  string         `db:"character_set_client"`
 	CollationConnection string         `db:"collation_connection"`
 	DatabaseCollation   string         `db:"Database Collation"`
+	AccountCheck        template.HTML
+}
+
+type TableInfo struct {
+	Field   string         `db:"Field"`
+	Type    string         `db:"Type"`
+	Null    sql.NullString `db:"Null"`
+	Key     string         `db:"Key"`
+	Default sql.NullString `db:"Default"`
+	Extra   string         `db:"Extra"`
 }
 
 type Procedures struct {
@@ -79,8 +91,9 @@ type handler struct {
 }
 
 func init() {
-	log.SetHandler(jsonhandler.Default)
+	log.SetHandler(texthandler.Default)
 	if s := os.Getenv("UP_STAGE"); s != "" {
+		log.SetHandler(jsonhandler.Default)
 		version = s
 	}
 	if v := os.Getenv("UP_COMMIT"); v != "" {
@@ -92,7 +105,7 @@ func init() {
 // New setups the configuration assuming various parameters have been setup in the AWS account
 func New() (h handler, err error) {
 
-	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-prod"))
+	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-dev"))
 	if err != nil {
 		log.WithError(err).Fatal("setting up credentials")
 		return
@@ -111,7 +124,7 @@ func New() (h handler, err error) {
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
 
-	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL&collation=utf8mb4_unicode_ci",
+	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL&collation=utf8mb4_unicode_520_ci",
 		"root",
 		e.GetSecret("MYSQL_ROOT_PASSWORD"),
 		h.mysqlhost)
@@ -137,6 +150,7 @@ func (h handler) BasicEngine() http.Handler {
 	app.HandleFunc("/call", h.call).Methods("GET")
 	app.HandleFunc("/checks", h.checks).Methods("GET")
 	app.HandleFunc("/unicode", h.unicode).Methods("GET")
+	app.HandleFunc("/tables", h.tables).Methods("GET")
 	app.HandleFunc("/describe", func(w http.ResponseWriter, r *http.Request) { response.JSON(w, h.dbInfo) }).Methods("GET")
 	app.Handle("/metrics", promhttp.Handler()).Methods("GET")
 	log.Infof("STAGE: %s", os.Getenv("UP_STAGE"))
@@ -204,6 +218,54 @@ func main() {
 
 }
 
+func (h handler) tables(w http.ResponseWriter, r *http.Request) {
+	var tables []string
+	err := h.db.Select(&tables, `show tables`)
+	if err != nil {
+		log.WithError(err).Errorf("failed to show tables")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	smallint := make(map[string]int)
+
+	for _, t := range tables {
+		var tinfo []TableInfo
+		err := h.db.Select(&tinfo, fmt.Sprintf("describe %s", t))
+		if err != nil {
+			log.WithError(err).WithField("table", t).Errorf("failed to describe table")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if strings.Contains(tinfo[0].Type, "smallint") {
+			var count int
+			err := h.db.Get(&count, fmt.Sprintf("select COUNT(*) from %s", t))
+			if err != nil {
+				log.WithError(err).WithField("table", t).Errorf("failed to count table")
+			}
+			smallint[t] = count
+		}
+	}
+
+	// https://stackoverflow.com/a/44380276/4534
+
+	type kv struct {
+		Key   string
+		Value int
+	}
+
+	var ss []kv
+	for k, v := range smallint {
+		ss = append(ss, kv{k, v})
+	}
+
+	sort.Slice(ss, func(i, j int) bool {
+		return ss[i].Value > ss[j].Value
+	})
+
+	response.OK(w, ss)
+}
+
 func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 
 	type config struct {
@@ -219,19 +281,28 @@ func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := 0; i < len(configuration); i++ {
-		if configuration[i].Value == "utf8mb4" || configuration[i].Value == "utf8mb4_unicode_ci" {
+		if configuration[i].Value == "utf8mb4" || configuration[i].Value == "utf8mb4_unicode_520_ci" {
 			configuration[i].Good = true
 		}
-		if configuration[i].Key == "character_set_system" && configuration[i].Value == "utf8" {
+		if configuration[i].Key == "character_set_system" && configuration[i].Value == "utf8mb4" {
 			configuration[i].Good = true
 		}
 		if configuration[i].Key == "character_set_filesystem" && configuration[i].Value == "binary" {
 			configuration[i].Good = true
 		}
-
 	}
 
-	var t = template.Must(template.New("").Parse(`<ol>
+	var t = template.Must(template.New("").Parse(`<!DOCTYPE html>
+<html lang=en>
+<head>
+<meta charset="utf-8">
+<title>Unicode test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<style>
+body { padding: 1rem; font-family: "Open Sans", "Segoe UI", "Seravek", sans-serif; }
+</style>
+<body>
+<ol>
 {{- range . }}
 {{- if .Good }}
 <li>{{ .Key }} - {{ .Value }}</li>
@@ -239,9 +310,7 @@ func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 <li style="color: red">{{ .Key }} - {{ .Value }}</li>
 {{- end }}
 {{- end }}
-</ol>`))
-
-	w.Header().Set("Content-Type", "text/html")
+</ol></body></html>`))
 	t.Execute(w, configuration)
 }
 
@@ -333,8 +402,8 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// log.Infof("Results: %#v", pp)
-	var output string
-	for i, v := range pp {
+	var procsInfo []CreateProcedure
+	for _, v := range pp {
 		if !strings.HasPrefix(v.Name, "lambda") {
 			continue
 		}
@@ -350,26 +419,76 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(&src.Procedure, &src.SqlMode, &src.Source, &src.CharacterSetClient, &src.CollationConnection, &src.DatabaseCollation)
 		if err != nil {
 			log.WithError(err).WithField("name", v.Name).Error("failed to get procedure source")
-			output += fmt.Sprintf("<h1 style='color: orange;'>%d: No source found for %s</h1>\n", i, v.Name)
 			continue
 		}
 
 		result := findNamedMatches(myExp, src.Source.String)
 		// log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
-
 		// log.WithField("name", v.Name).Infof("src: %#v", &src.Source)
-		output += fmt.Sprintf("<h1>%d: %s</h1>\n", i, v.Name)
+		output := fmt.Sprintf("Fn: %s Account: %s", result["fn"], result["account"])
 		if result["fn"] == "alambda_simple" {
 			if result["account"] != h.AccountID {
-				output += fmt.Sprintf("<h2 style='color: red;'>Account ID %s != %s</h2>\n", result["account"], h.AccountID)
+				output += fmt.Sprintf("<span style='color: red;'>Account ID %s != %s</span>\n", result["account"], h.AccountID)
 			}
 		} else {
-			output += fmt.Sprintf("<h2 style='color: yellow;'>Function %s != %s</h2>\n", result["fn"], "alambda_simple")
+			output += fmt.Sprintf("<span style='color: yellow;'>Function %s != %s</span>\n", result["fn"], "alambda_simple")
 		}
-		output += fmt.Sprintf("<pre>%s</pre>\n", src.Source.String)
+		src.AccountCheck = template.HTML(output)
+
+		procsInfo = append(procsInfo, src)
+
 	}
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, output)
+	// log.Infof("%#v", procsInfo)
+	var t = template.Must(template.New("").Parse(`<html>
+<head>
+<meta charset="utf-8">
+<title>Database checks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<style>
+body { padding: 1rem; font-family: "Open Sans", "Segoe UI", "Seravek", sans-serif; }
+pre {
+  max-width: 10em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+pre:hover {
+  max-width: none;
+  white-space: pre;
+}
+</style>
+</head>
+<body>
+<ol>
+{{- range . }}
+
+<h2>proc: {{ .Procedure }}</h2>
+<p>Collation: {{ .CollationConnection }}</p>
+
+{{- if eq .DatabaseCollation "utf8mb4_unicode_520_ci"  }}
+<p>DatabaseCollation: {{ .DatabaseCollation }}</p>
+{{ else }}
+<p style="color: red">DatabaseCollation: {{ .DatabaseCollation }}</p>
+{{ end }}
+
+{{- if eq .CharacterSetClient "utf8mb4"  }}
+<p>CharacterSetClient: {{ .CharacterSetClient }}</p>
+{{ else }}
+<p style="color: red">CharacterSetClient: {{ .CharacterSetClient }}</p>
+{{ end }}
+
+<p>Lambda ARN check: {{ .AccountCheck }}</p>
+<pre>Source: {{ .Source }}</pre>
+{{- end }}
+</ol>
+</body>
+</html>`))
+	err = t.Execute(w, procsInfo)
+	if err != nil {
+		log.WithError(err).Error("template")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h handler) call(w http.ResponseWriter, r *http.Request) {
