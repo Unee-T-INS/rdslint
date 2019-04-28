@@ -41,6 +41,7 @@ var (
 var myExp = regexp.MustCompile(`(?m)arn:aws:lambda:ap-southeast-1:(?P<account>\d+):function:(?P<fn>\w+)`)
 
 type CreateProcedure struct {
+	Database            string
 	Procedure           string         `db:"Procedure"`
 	SqlMode             string         `db:"sql_mode"`
 	Source              sql.NullString `db:"Create Procedure"`
@@ -60,7 +61,7 @@ type TableInfo struct {
 }
 
 type Procedures struct {
-	Db                  string    `db:"Db"`
+	Database            string    `db:"Db"`
 	Name                string    `db:"Name"`
 	Definer             string    `db:"Definer"`
 	Type                string    `db:"Type"`
@@ -414,8 +415,9 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 
 		var src CreateProcedure
 		// There must be an easier way
-		log.Infof("Switching to: %s", v.Db)
-		h.db.MustExec(fmt.Sprintf("use %s", v.Db))
+		log.Debugf("Switching to: %s", v.Database)
+		h.db.MustExec(fmt.Sprintf("use %s", v.Database))
+		src.Database = v.Database
 		err := h.db.QueryRow(fmt.Sprintf("SHOW CREATE PROCEDURE %s", v.Name)).Scan(&src.Procedure, &src.SqlMode, &src.Source, &src.CharacterSetClient, &src.CollationConnection, &src.DatabaseCollation)
 		if err != nil {
 			log.WithError(err).WithField("name", v.Name).Error("failed to get procedure source")
@@ -462,7 +464,7 @@ pre:hover {
 <ol>
 {{- range . }}
 
-<h2>proc: {{ .Procedure }}</h2>
+<h2>Db: {{ .Database }} proc: {{ .Procedure }}</h2>
 <p>Collation: {{ .CollationConnection }}</p>
 
 {{- if eq .DatabaseCollation "utf8mb4_unicode_520_ci"  }}
@@ -478,7 +480,7 @@ pre:hover {
 {{ end }}
 
 <p>Lambda ARN check: {{ .AccountCheck }}</p>
-<pre>Source: {{ .Source }}</pre>
+<pre>{{ .Source }}</pre>
 {{- end }}
 </ol>
 </body>
