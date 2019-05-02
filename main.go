@@ -279,7 +279,7 @@ func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 		Configuration []config
 	}
 
-	dbinfo := []dbunicode{{Name: "bugzilla"}}
+	dbinfo := []dbunicode{{Name: "bugzilla"}, {Name: "unee_t_enterprise"}}
 
 	for j := 0; j < len(dbinfo); j++ {
 		h.db.MustExec(fmt.Sprintf("use %s", dbinfo[j].Name))
