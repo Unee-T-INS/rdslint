@@ -273,22 +273,32 @@ func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 		Value string `db:"Value"`
 		Good  bool
 	}
-	var configuration []config
-	err := h.db.Select(&configuration, `show variables where variable_name like 'character\_set\_%' or variable_name like 'collation%';`)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+
+	type dbunicode struct {
+		Name          string
+		Configuration []config
 	}
 
-	for i := 0; i < len(configuration); i++ {
-		if configuration[i].Value == "utf8mb4" || configuration[i].Value == "utf8mb4_unicode_520_ci" {
-			configuration[i].Good = true
+	dbinfo := []dbunicode{{Name: "bugzilla"}}
+
+	for j := 0; j < len(dbinfo); j++ {
+		h.db.MustExec(fmt.Sprintf("use %s", dbinfo[j].Name))
+		err := h.db.Select(&dbinfo[j].Configuration, `show variables where variable_name like 'character\_set\_%' or variable_name like 'collation%';`)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		if configuration[i].Key == "character_set_system" && configuration[i].Value == "utf8mb4" {
-			configuration[i].Good = true
-		}
-		if configuration[i].Key == "character_set_filesystem" && configuration[i].Value == "binary" {
-			configuration[i].Good = true
+
+		for i := 0; i < len(dbinfo[j].Configuration); i++ {
+			if dbinfo[j].Configuration[i].Value == "utf8mb4" || dbinfo[j].Configuration[i].Value == "utf8mb4_unicode_520_ci" {
+				dbinfo[j].Configuration[i].Good = true
+			}
+			if dbinfo[j].Configuration[i].Key == "character_set_system" && dbinfo[j].Configuration[i].Value == "utf8mb4" {
+				dbinfo[j].Configuration[i].Good = true
+			}
+			if dbinfo[j].Configuration[i].Key == "character_set_filesystem" && dbinfo[j].Configuration[i].Value == "binary" {
+				dbinfo[j].Configuration[i].Good = true
+			}
 		}
 	}
 
@@ -302,16 +312,25 @@ func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 body { padding: 1rem; font-family: "Open Sans", "Segoe UI", "Seravek", sans-serif; }
 </style>
 <body>
-<ol>
 {{- range . }}
+<h1>{{ .Name }}</h1>
+<ol>
+{{- range .Configuration }}
 {{- if .Good }}
 <li>{{ .Key }} - {{ .Value }}</li>
 {{ else }}
 <li style="color: red">{{ .Key }} - {{ .Value }}</li>
 {{- end }}
 {{- end }}
-</ol></body></html>`))
-	t.Execute(w, configuration)
+</ol>
+{{- end }}
+</body></html>`))
+	err := t.Execute(w, dbinfo)
+	if err != nil {
+		log.WithError(err).Error("template failed")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h handler) checks(w http.ResponseWriter, r *http.Request) {
@@ -714,10 +733,9 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 				return dbInfo, err
 			}
 			log.WithField("DBClusterParameterGroup", *v.DBClusterParameterGroup).Info("recording cluster")
-			log.Infof("HERE %#v", result)
 
 			dbInfo.Params = append(dbInfo.Params, result.Parameters...)
-			log.Infof("cluster: %#v", dbInfo.Params)
+			// log.Infof("cluster: %#v", dbInfo.Params)
 
 			log.WithField("number of dbs", len(v.DBClusterMembers)).Info("describing instances")
 			for _, db := range v.DBClusterMembers {
