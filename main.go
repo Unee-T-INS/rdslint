@@ -125,7 +125,7 @@ func New() (h handler, err error) {
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
 
-	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL&collation=utf8mb4_unicode_520_ci",
+	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL",
 		"root",
 		e.GetSecret("MYSQL_ROOT_PASSWORD"),
 		h.mysqlhost)
@@ -172,7 +172,6 @@ func main() {
 		log.WithError(err).Fatal("error setting configuration")
 		return
 	}
-
 	defer h.db.Close()
 
 	dbcheck := prometheus.NewGaugeVec(
@@ -692,12 +691,10 @@ func (h handler) lookupClusterName() (string, error) {
 }
 
 func (h handler) describeCluster() (dbInfo dbinfo, err error) {
-
 	dnsEndpoint, err := h.lookupClusterName()
 	if err != nil {
 		return dbInfo, err
 	}
-
 	rdsapi := rds.New(h.AWSCfg)
 	req := rdsapi.DescribeDBClustersRequest(&rds.DescribeDBClustersInput{})
 	result, err := req.Send()
@@ -708,6 +705,21 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 		if *v.Endpoint == dnsEndpoint {
 			dbInfo.Cluster = v
 			// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/rds#example-RDS-DescribeDBInstancesRequest-Shared00
+
+			req := rdsapi.DescribeDBClusterParametersRequest(&rds.DescribeDBClusterParametersInput{DBClusterParameterGroupName: aws.String(*v.DBClusterParameterGroup),
+				Source: aws.String("user"),
+			})
+			result, err := req.Send()
+			if err != nil {
+				return dbInfo, err
+			}
+			log.WithField("DBClusterParameterGroup", *v.DBClusterParameterGroup).Info("recording cluster")
+			log.Infof("HERE %#v", result)
+
+			dbInfo.Params = append(dbInfo.Params, result.Parameters...)
+			log.Infof("cluster: %#v", dbInfo.Params)
+
+			log.WithField("number of dbs", len(v.DBClusterMembers)).Info("describing instances")
 			for _, db := range v.DBClusterMembers {
 				req := rdsapi.DescribeDBInstancesRequest(&rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(*db.DBInstanceIdentifier)})
 				result, err := req.Send()
@@ -715,7 +727,6 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 					return dbInfo, err
 				}
 				dbInfo.DBs = append(dbInfo.DBs, result.DBInstances...)
-				// log.Infof("Result: %#v", result.DBInstances)
 
 			}
 			for _, db := range dbInfo.DBs {
@@ -725,8 +736,10 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 					if groupName != group.DBParameterGroupName {
 						log.Errorf("Differing parameter groups! %q != %q", *groupName, *group.DBParameterGroupName)
 					}
+					log.WithField("groupname", *group.DBParameterGroupName).Info("describing")
 					req := rdsapi.DescribeDBParametersRequest(&rds.DescribeDBParametersInput{
 						DBParameterGroupName: aws.String(*group.DBParameterGroupName),
+						Source:               aws.String("user"),
 					})
 
 					p := req.Paginate()
