@@ -316,8 +316,6 @@ func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Infof("config: %#v", dbinfo)
-
 	var t = template.Must(template.New("").Parse(`<!DOCTYPE html>
 <html lang=en>
 <head>
