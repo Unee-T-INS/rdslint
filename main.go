@@ -335,7 +335,19 @@ body { padding: 1rem; font-family: "Open Sans", "Segoe UI", "Seravek", sans-seri
 {{ end }}
 <ol>
 {{- range .Tables }}
-<li>{{ .Name }} - {{ .Collation }}</li>
+{{ if .Collation.Valid }}
+<li>{{ .Name }} - 
+
+{{ if eq .Collation.String "utf8mb4_unicode_520_ci" }}
+{{ .Collation.String }}
+{{ else }}
+<span style="color:red">{{ .Collation.String }}</span>
+{{ end }}
+
+</li>
+{{ else }}
+<li>{{ .Name }} - Missing collation</li>
+{{ end }}
 {{- end }}
 </ol>
 {{- end }}
@@ -498,7 +510,6 @@ pre:hover {
 {{- range . }}
 
 <h2>Db: {{ .Database }} proc: {{ .Procedure }}</h2>
-<p>Collation: {{ .CollationConnection }}</p>
 
 {{- if eq .DatabaseCollation "utf8mb4_unicode_520_ci"  }}
 <p>DatabaseCollation: {{ .DatabaseCollation }}</p>
