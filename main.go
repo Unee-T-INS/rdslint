@@ -29,6 +29,7 @@ import (
 	jsonhandler "github.com/apex/log/handlers/json"
 	texthandler "github.com/apex/log/handlers/text"
 
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -268,39 +269,54 @@ func (h handler) tables(w http.ResponseWriter, r *http.Request) {
 
 func (h handler) unicode(w http.ResponseWriter, r *http.Request) {
 
-	type config struct {
-		Key   string `db:"Variable_name"`
-		Value string `db:"Value"`
-		Good  bool
+	type tableStatus struct {
+		Name          string         `db:"Name"`
+		Engine        sql.NullString `db:"Engine"`
+		Version       sql.NullString `db:"Version"`
+		RowFormat     sql.NullString `db:"Row_format"`
+		Rows          sql.NullString `db:"Rows"`
+		AvgRowLength  sql.NullString `db:"Avg_row_length"`
+		DataLength    sql.NullString `db:"Data_length"`
+		MaxDataLength sql.NullString `db:"Max_data_length"`
+		IndexLength   sql.NullString `db:"Index_length"`
+		DataFree      sql.NullString `db:"Data_free"`
+		AutoIncrement sql.NullInt64  `db:"Auto_increment"`
+		CreateTime    mysql.NullTime `db:"Create_time"`
+		UpdateTime    mysql.NullTime `db:"Update_time"`
+		CheckTime     mysql.NullTime `db:"Check_time"`
+		Checksum      sql.NullString `db:"Checksum"`
+		CreateOptions sql.NullString `db:"Create_options"`
+		Comment       sql.NullString `db:"Comment"`
+		Collation     sql.NullString `db:"Collation"`
 	}
 
+	type showCreate struct {
+		Database       string `db:"Database"`
+		CreateDatabase string `db:"Create Database"`
+	}
 	type dbunicode struct {
-		Name          string
-		Configuration []config
+		Name   string
+		Info   []showCreate
+		Tables []tableStatus
 	}
-
 	dbinfo := []dbunicode{{Name: "bugzilla"}, {Name: "unee_t_enterprise"}}
 
 	for j := 0; j < len(dbinfo); j++ {
 		h.db.MustExec(fmt.Sprintf("use %s", dbinfo[j].Name))
-		err := h.db.Select(&dbinfo[j].Configuration, `show variables where variable_name like 'character\_set\_%' or variable_name like 'collation%';`)
+		err := h.db.Select(&dbinfo[j].Info, fmt.Sprintf("SHOW CREATE DATABASE %s;", dbinfo[j].Name))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		for i := 0; i < len(dbinfo[j].Configuration); i++ {
-			if dbinfo[j].Configuration[i].Value == "utf8mb4" || dbinfo[j].Configuration[i].Value == "utf8mb4_unicode_520_ci" {
-				dbinfo[j].Configuration[i].Good = true
-			}
-			if dbinfo[j].Configuration[i].Key == "character_set_system" && dbinfo[j].Configuration[i].Value == "utf8mb4" {
-				dbinfo[j].Configuration[i].Good = true
-			}
-			if dbinfo[j].Configuration[i].Key == "character_set_filesystem" && dbinfo[j].Configuration[i].Value == "binary" {
-				dbinfo[j].Configuration[i].Good = true
-			}
+		err = h.db.Select(&dbinfo[j].Tables, `SHOW TABLE STATUS;`)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 	}
+
+	log.Infof("config: %#v", dbinfo)
 
 	var t = template.Must(template.New("").Parse(`<!DOCTYPE html>
 <html lang=en>
@@ -314,13 +330,12 @@ body { padding: 1rem; font-family: "Open Sans", "Segoe UI", "Seravek", sans-seri
 <body>
 {{- range . }}
 <h1>{{ .Name }}</h1>
+{{ range .Info }}
+<p>{{ .CreateDatabase }}</p>
+{{ end }}
 <ol>
-{{- range .Configuration }}
-{{- if .Good }}
-<li>{{ .Key }} - {{ .Value }}</li>
-{{ else }}
-<li style="color: red">{{ .Key }} - {{ .Value }}</li>
-{{- end }}
+{{- range .Tables }}
+<li>{{ .Name }} - {{ .Collation }}</li>
 {{- end }}
 </ol>
 {{- end }}
