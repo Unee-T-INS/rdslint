@@ -38,4 +38,5 @@ matrix:
         script: AWS_ACCESS_KEY_ID=$AWS_192458993663_ID AWS_SECRET_ACCESS_KEY=$AWS_192458993663_SECRET make prod
 
 env:
-  - GO111MODULE=on
+  global:
+    - GO111MODULE=on
