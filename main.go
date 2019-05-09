@@ -126,7 +126,7 @@ func New() (h handler, err error) {
 		APIAccessToken: e.GetSecret("API_ACCESS_TOKEN"),
 	}
 
-	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL",
+	h.DSN = fmt.Sprintf("%s:%s@tcp(%s:3306)/bugzilla?parseTime=true&multiStatements=true&sql_mode=TRADITIONAL&collation=utf8mb4_unicode_520_ci",
 		"root",
 		e.GetSecret("MYSQL_ROOT_PASSWORD"),
 		h.mysqlhost)
