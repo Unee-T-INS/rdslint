@@ -484,6 +484,12 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 		procsInfo = append(procsInfo, src)
 
 	}
+
+	rejig := map[string][]CreateProcedure{}
+	for _, v := range procsInfo {
+		rejig[v.Database] = append(rejig[v.Database], v)
+	}
+
 	// log.Infof("%#v", procsInfo)
 	var t = template.Must(template.New("").Parse(`<html>
 <head>
@@ -505,30 +511,38 @@ pre:hover {
 </style>
 </head>
 <body>
+
+{{ range $key, $value := . }}
+<h2>Database: {{ $key }}</h2>
+
 <ol>
 {{- range . }}
+<li>
+<h4>Procedure: {{ .Procedure }}</h4>
 
-<h2>Database: {{ .Database }} Procedure: {{ .Procedure }}</h2>
-
-{{- if eq .DatabaseCollation "utf8mb4_unicode_520_ci"  }}
-<p>DatabaseCollation: {{ .DatabaseCollation }}</p>
+{{- if eq .DatabaseCollation "utf8mb4_unicode_520_ci" }}
+<span>DatabaseCollation: {{ .DatabaseCollation }}</span>
 {{ else }}
-<p style="color: red">DatabaseCollation: {{ .DatabaseCollation }}</p>
+<span style="color: red">DatabaseCollation: {{ .DatabaseCollation }}</span>
 {{ end }}
 
 {{- if eq .CharacterSetClient "utf8mb4"  }}
-<p>CharacterSetClient: {{ .CharacterSetClient }}</p>
+<span>CharacterSetClient: {{ .CharacterSetClient }}</span>
 {{ else }}
-<p style="color: red">CharacterSetClient: {{ .CharacterSetClient }}</p>
+<span style="color: red">CharacterSetClient: {{ .CharacterSetClient }}</span>
 {{ end }}
 
+{{ if .AccountCheck }}
 <p>Lambda ARN check: {{ .AccountCheck }}</p>
-<pre>{{ .Source }}</pre>
+{{ end }}
+</li>
+
 {{- end }}
 </ol>
+{{ end }}
 </body>
 </html>`))
-	err = t.Execute(w, procsInfo)
+	err = t.Execute(w, rejig)
 	if err != nil {
 		log.WithError(err).Error("template")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
