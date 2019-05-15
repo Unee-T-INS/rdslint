@@ -205,7 +205,7 @@ func main() {
 	// https://github.com/prometheus/docs/blob/master/content/docs/instrumenting/writing_exporters.md#collectors
 	// but it's lambda, so can we assume it goes cold ??
 	prometheus.MustRegister(dbcheck)
-	prometheus.MustRegister(h.userGroupMapCount())
+	// prometheus.MustRegister(h.userGroupMapCount())
 	prometheus.MustRegister(h.slowLogEnabled())
 	prometheus.MustRegister(h.iamEnabled())
 	prometheus.MustRegister(h.insync())
@@ -448,11 +448,10 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 	// log.Infof("Results: %#v", pp)
 	var procsInfo []CreateProcedure
 	for _, v := range pp {
-		if !strings.HasPrefix(v.Name, "lambda") {
+		if v.Database == "sys" {
 			continue
 		}
-
-		if v.Name == "lambda_async" {
+		if v.Database == "mysql" {
 			continue
 		}
 
@@ -467,18 +466,20 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		result := findNamedMatches(myExp, src.Source.String)
-		// log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
-		// log.WithField("name", v.Name).Infof("src: %#v", &src.Source)
-		output := fmt.Sprintf("Fn: %s Account: %s", result["fn"], result["account"])
-		if result["fn"] == "alambda_simple" {
-			if result["account"] != h.AccountID {
-				output += fmt.Sprintf("<span style='color: red;'>Account ID %s != %s</span>\n", result["account"], h.AccountID)
+		if strings.HasPrefix(v.Name, "lambda") {
+			result := findNamedMatches(myExp, src.Source.String)
+			// log.Infof("account: %s fn: %s\n", result["account"], result["fn"])
+			// log.WithField("name", v.Name).Infof("src: %#v", &src.Source)
+			output := fmt.Sprintf("Fn: %s Account: %s", result["fn"], result["account"])
+			if result["fn"] == "alambda_simple" {
+				if result["account"] != h.AccountID {
+					output += fmt.Sprintf("<span style='color: red;'>Account ID %s != %s</span>\n", result["account"], h.AccountID)
+				}
+			} else {
+				output += fmt.Sprintf("<span style='color: red;'>Function %s != %s</span>\n", result["fn"], "alambda_simple")
 			}
-		} else {
-			output += fmt.Sprintf("<span style='color: yellow;'>Function %s != %s</span>\n", result["fn"], "alambda_simple")
+			src.AccountCheck = template.HTML(output)
 		}
-		src.AccountCheck = template.HTML(output)
 
 		procsInfo = append(procsInfo, src)
 
@@ -507,7 +508,7 @@ pre:hover {
 <ol>
 {{- range . }}
 
-<h2>Db: {{ .Database }} proc: {{ .Procedure }}</h2>
+<h2>Database: {{ .Database }} Procedure: {{ .Procedure }}</h2>
 
 {{- if eq .DatabaseCollation "utf8mb4_unicode_520_ci"  }}
 <p>DatabaseCollation: {{ .DatabaseCollation }}</p>
