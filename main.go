@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"html/template"
@@ -50,6 +51,7 @@ type CreateProcedure struct {
 	CollationConnection string         `db:"collation_connection"`
 	DatabaseCollation   string         `db:"Database Collation"`
 	AccountCheck        template.HTML
+	CorrectCollation    bool
 }
 
 type TableInfo struct {
@@ -107,7 +109,7 @@ func init() {
 // New setups the configuration assuming various parameters have been setup in the AWS account
 func New() (h handler, err error) {
 
-	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-dev"))
+	cfg, err := external.LoadDefaultAWSConfig(external.WithSharedConfigProfile("uneet-prod"))
 	if err != nil {
 		log.WithError(err).Fatal("setting up credentials")
 		return
@@ -415,7 +417,7 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 				RoleName: aws.String(strings.TrimPrefix(a.Resource, "role/")),
 			})
 			// aws --profile uneet-prod iam list-attached-role-policies --role-name Aurora_access_to_lambda
-			resp, err := req.Send()
+			resp, err := req.Send(context.TODO())
 			if err != nil {
 				log.WithError(err).Error("failed to get policies")
 				return
@@ -481,6 +483,10 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 			src.AccountCheck = template.HTML(output)
 		}
 
+		if src.DatabaseCollation == "utf8mb4_unicode_520_ci" && src.CharacterSetClient == "utf8mb4" {
+			src.CorrectCollation = true
+		}
+
 		procsInfo = append(procsInfo, src)
 
 	}
@@ -491,7 +497,16 @@ func (h handler) checks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// log.Infof("%#v", procsInfo)
-	var t = template.Must(template.New("").Parse(`<html>
+	var t = template.Must(template.New("").Funcs(template.FuncMap{
+		"IncorrectCount": func(procs []CreateProcedure) (wrong int) {
+			for _, v := range procs {
+				if !v.CorrectCollation {
+					wrong++
+				}
+			}
+			return
+		},
+	}).Parse(`<html>
 <head>
 <meta charset="utf-8">
 <title>Database checks</title>
@@ -514,6 +529,7 @@ pre:hover {
 
 {{ range $key, $value := . }}
 <h2>Database: {{ $key }}</h2>
+<p>Issues: {{ IncorrectCount . }} / {{ len . }}</p>
 
 <ol>
 {{- range . }}
@@ -709,7 +725,7 @@ func (h handler) lookupHostedZone() (string, error) {
 	// https://godoc.org/github.com/aws/aws-sdk-go-v2/service/route53#example-Route53-GetHostedZoneRequest-Shared00
 	r53 := route53.New(h.AWSCfg)
 	req := r53.ListHostedZonesRequest(&route53.ListHostedZonesInput{})
-	hzs, err := req.Send()
+	hzs, err := req.Send(context.TODO())
 	if err != nil {
 		return "", err
 	}
@@ -737,7 +753,7 @@ func (h handler) lookupClusterName() (string, error) {
 	req := r53.ListResourceRecordSetsRequest(&route53.ListResourceRecordSetsInput{
 		HostedZoneId: aws.String(hz),
 	})
-	listrecords, err := req.Send()
+	listrecords, err := req.Send(context.TODO())
 	for _, v := range listrecords.ResourceRecordSets {
 		log.Infof("Name: %s", *v.Name)
 		if *v.Name == h.mysqlhost+"." {
@@ -755,7 +771,7 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 	}
 	rdsapi := rds.New(h.AWSCfg)
 	req := rdsapi.DescribeDBClustersRequest(&rds.DescribeDBClustersInput{})
-	result, err := req.Send()
+	result, err := req.Send(context.TODO())
 	if err != nil {
 		return dbInfo, err
 	}
@@ -767,19 +783,19 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 			req := rdsapi.DescribeDBClusterParametersRequest(&rds.DescribeDBClusterParametersInput{DBClusterParameterGroupName: aws.String(*v.DBClusterParameterGroup),
 				Source: aws.String("user"),
 			})
-			result, err := req.Send()
+			result, err := req.Send(context.TODO())
 			if err != nil {
 				return dbInfo, err
 			}
 			log.WithField("DBClusterParameterGroup", *v.DBClusterParameterGroup).Info("recording cluster")
 
 			dbInfo.Params = append(dbInfo.Params, result.Parameters...)
-			// log.Infof("cluster: %#v", dbInfo.Params)
+			log.Infof("cluster: %#v", dbInfo.Params)
 
 			log.WithField("number of dbs", len(v.DBClusterMembers)).Info("describing instances")
 			for _, db := range v.DBClusterMembers {
 				req := rdsapi.DescribeDBInstancesRequest(&rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(*db.DBInstanceIdentifier)})
-				result, err := req.Send()
+				result, err := req.Send(context.TODO())
 				if err != nil {
 					return dbInfo, err
 				}
@@ -799,8 +815,8 @@ func (h handler) describeCluster() (dbInfo dbinfo, err error) {
 						Source:               aws.String("user"),
 					})
 
-					p := req.Paginate()
-					for p.Next() {
+					p := rds.NewDescribeDBParametersPaginator(req)
+					for p.Next(context.TODO()) {
 						page := p.CurrentPage()
 						dbInfo.Params = append(dbInfo.Params, page.Parameters...)
 						// log.Infof("Page: %#v", page)

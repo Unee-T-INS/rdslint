@@ -19,7 +19,7 @@ matrix:
       deploy:
         provider: script
         skip_cleanup: true
-        script: make
+        script: AWS_ACCESS_KEY_ID=$AWS_812644853088_ID AWS_SECRET_ACCESS_KEY=$AWS_812644853088_SECRET make
         on:
           branch: master
     - env: DEPLOY=demo

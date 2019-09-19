@@ -31,3 +31,5 @@ Requires:
 
 * AmazonRoute53ReadOnlyAccess
 * AmazonRDSReadOnlyAccess
+
+Refreshed Parameters needs a need a re-deployment.
